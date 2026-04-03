@@ -1,0 +1,65 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+tests/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+flask_output.log
+
+# Documentation (not needed in container)
+*.md
+!README.md
+
+# Demo scripts
+demo.sh
+phase1_demo.sh
+verify_service_logic.sh
+phase1_output.txt
+
+# Old versions
+The code versions for DevOps Assignment/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# CSV exports
+*.csv
+
+# Environment files
+.env
+.env.local
+
