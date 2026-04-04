@@ -9,10 +9,58 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime
 import os
+import sqlite3
 
 app = Flask(__name__)
 app.secret_key = 'aceest-fitness-secret-key-2024'
 
+# Database configuration (from Aceestver2.0.1)
+DB_NAME = "aceest_fitness.db"
+
+def get_db_connection():
+    """Get SQLite database connection"""
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    """Initialize database tables (from Aceestver2.0.1)"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Clients table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE,
+            age INTEGER,
+            weight REAL,
+            program TEXT,
+            calories INTEGER,
+            adherence INTEGER DEFAULT 0,
+            notes TEXT DEFAULT '',
+            created_at TEXT
+        )
+    """)
+
+    # Progress tracking table (from Aceestver2.0.1)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_name TEXT,
+            week TEXT,
+            adherence INTEGER,
+            recorded_at TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+# Initialize database on startup
+init_db()
+
+# In-memory cache (for backward compatibility)
 clients_db = []
 
 PROGRAMS = {
@@ -48,7 +96,7 @@ def dashboard():
 
 @app.route('/add-client', methods=['POST'])
 def add_client():
-    """Add a new client (equivalent to save_client in GUI)"""
+    """Add a new client (equivalent to save_client in GUI) - Now with SQLite from Aceestver2.0.1"""
     try:
         data = request.get_json() if request.is_json else request.form
 
@@ -72,9 +120,31 @@ def add_client():
             }), 400
 
         estimated_calories = int(weight * PROGRAMS[program]['calorie_factor'])
+        created_at = datetime.now().isoformat()
+
+        # Save to SQLite database (from Aceestver2.0.1)
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                INSERT OR REPLACE INTO clients 
+                (name, age, weight, program, calories, adherence, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (name, age, weight, program, estimated_calories, adherence, notes, created_at))
+            conn.commit()
+            client_id = cur.lastrowid
+        except Exception as e:
+            conn.close()
+            return jsonify({
+                'success': False,
+                'error': f'Database error: {str(e)}'
+            }), 500
+
+        conn.close()
 
         client = {
-            'id': len(clients_db) + 1,
+            'id': client_id,
             'name': name,
             'age': age,
             'weight': weight,
@@ -82,9 +152,10 @@ def add_client():
             'adherence': adherence,
             'notes': notes,
             'estimated_calories': estimated_calories,
-            'created_at': datetime.now().isoformat()
+            'created_at': created_at
         }
 
+        # Also update in-memory cache for backward compatibility
         clients_db.append(client)
 
         return jsonify({
@@ -102,22 +173,91 @@ def add_client():
 
 @app.route('/clients')
 def get_clients():
-    """Get all clients (for table display)"""
+    """Get all clients from SQLite database (from Aceestver2.0.1)"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM clients ORDER BY id DESC")
+    rows = cur.fetchall()
+    conn.close()
+
+    clients = []
+    for row in rows:
+        clients.append({
+            'id': row['id'],
+            'name': row['name'],
+            'age': row['age'],
+            'weight': row['weight'],
+            'program': row['program'],
+            'adherence': row['adherence'] or 0,
+            'notes': row['notes'] or '',
+            'estimated_calories': row['calories'],
+            'created_at': row['created_at']
+        })
+
     return jsonify({
         'success': True,
-        'clients': clients_db,
-        'count': len(clients_db)
+        'clients': clients,
+        'count': len(clients)
     })
 
 @app.route('/client/<int:client_id>')
 def get_client(client_id):
-    """Get specific client details"""
-    client = next((c for c in clients_db if c['id'] == client_id), None)
-    if not client:
+    """Get specific client details from SQLite (equivalent to load_client in Aceestver2.0.1)"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM clients WHERE id=?", (client_id,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
         return jsonify({
             'success': False,
             'error': 'Client not found'
         }), 404
+
+    client = {
+        'id': row['id'],
+        'name': row['name'],
+        'age': row['age'],
+        'weight': row['weight'],
+        'program': row['program'],
+        'adherence': row['adherence'] or 0,
+        'notes': row['notes'] or '',
+        'estimated_calories': row['calories'],
+        'created_at': row['created_at']
+    }
+
+    return jsonify({
+        'success': True,
+        'client': client
+    })
+
+@app.route('/client/name/<client_name>')
+def get_client_by_name(client_name):
+    """Get client by name from SQLite (equivalent to load_client in Aceestver2.0.1)"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM clients WHERE name=?", (client_name,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({
+            'success': False,
+            'error': 'Client not found'
+        }), 404
+
+    client = {
+        'id': row['id'],
+        'name': row['name'],
+        'age': row['age'],
+        'weight': row['weight'],
+        'program': row['program'],
+        'adherence': row['adherence'] or 0,
+        'notes': row['notes'] or '',
+        'estimated_calories': row['calories'],
+        'created_at': row['created_at']
+    }
 
     return jsonify({
         'success': True,
@@ -126,19 +266,107 @@ def get_client(client_id):
 
 @app.route('/delete-client/<int:client_id>', methods=['DELETE'])
 def delete_client(client_id):
+    """Delete client from SQLite database"""
     global clients_db
-    client = next((c for c in clients_db if c['id'] == client_id), None)
-    if not client:
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM clients WHERE id=?", (client_id,))
+    row = cur.fetchone()
+
+    if not row:
+        conn.close()
         return jsonify({
             'success': False,
             'error': 'Client not found'
         }), 404
 
+    client_name = row['name']
+    cur.execute("DELETE FROM clients WHERE id=?", (client_id,))
+    # Also delete related progress records
+    cur.execute("DELETE FROM progress WHERE client_name=?", (client_name,))
+    conn.commit()
+    conn.close()
+
+    # Update in-memory cache
     clients_db = [c for c in clients_db if c['id'] != client_id]
 
     return jsonify({
         'success': True,
-        'message': f'Client {client["name"]} deleted successfully'
+        'message': f'Client {client_name} deleted successfully'
+    })
+
+# ============== PROGRESS TRACKING (from Aceestver2.0.1) ==============
+
+@app.route('/save-progress', methods=['POST'])
+def save_progress():
+    """Save weekly progress (equivalent to save_progress in Aceestver2.0.1)"""
+    try:
+        data = request.get_json() if request.is_json else request.form
+
+        client_name = data.get('client_name', '').strip()
+        adherence = int(data.get('adherence', 0))
+
+        if not client_name:
+            return jsonify({
+                'success': False,
+                'error': 'Client name is required'
+            }), 400
+
+        week = datetime.now().strftime("Week %U - %Y")
+        recorded_at = datetime.now().isoformat()
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO progress (client_name, week, adherence, recorded_at)
+            VALUES (?, ?, ?, ?)
+        """, (client_name, week, adherence, recorded_at))
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Weekly progress logged',
+            'week': week,
+            'adherence': adherence
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error saving progress: {str(e)}'
+        }), 500
+
+@app.route('/progress/<client_name>')
+def get_progress(client_name):
+    """Get progress history for a client"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT * FROM progress 
+        WHERE client_name=? 
+        ORDER BY recorded_at DESC
+    """, (client_name,))
+    rows = cur.fetchall()
+    conn.close()
+
+    progress_history = []
+    for row in rows:
+        progress_history.append({
+            'id': row['id'],
+            'week': row['week'],
+            'adherence': row['adherence'],
+            'recorded_at': row['recorded_at']
+        })
+
+    return jsonify({
+        'success': True,
+        'client_name': client_name,
+        'progress': progress_history,
+        'total_entries': len(progress_history)
     })
 
 @app.route('/export-csv')
@@ -228,7 +456,16 @@ def progress_chart():
 
 @app.route('/reset-clients', methods=['POST'])
 def reset_clients():
+    """Reset all client data in SQLite database"""
     global clients_db
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM clients")
+    cur.execute("DELETE FROM progress")
+    conn.commit()
+    conn.close()
+
     clients_db = []
 
     return jsonify({
@@ -243,8 +480,13 @@ def home():
     return jsonify({
         'service': 'ACEest Fitness & Gym Management API',
         'status': 'running',
-        'version': '2.0.0',
-        'description': 'DevOps Assignment - Complete Web Application with GUI equivalent',
+        'version': '2.0.1',
+        'description': 'DevOps Assignment - Flask App with SQLite Database (based on Aceestver2.0.1)',
+        'features': [
+            'SQLite database persistence',
+            'Progress tracking',
+            'Client management'
+        ],
         'available_programs': list(PROGRAMS.keys()),
         'endpoints': {
             'GET /': 'Service information',
@@ -253,20 +495,38 @@ def home():
             'GET /api/programs': 'List all fitness programs',
             'GET /api/programs/<name>': 'Get specific program details',
             'POST /api/calculate-calories': 'Calculate calories for a program',
-            'POST /add-client': 'Add new client',
-            'GET /clients': 'Get all clients',
+            'POST /add-client': 'Add new client (saved to SQLite)',
+            'GET /clients': 'Get all clients from database',
+            'GET /client/<id>': 'Get client by ID',
+            'GET /client/name/<name>': 'Get client by name',
+            'DELETE /delete-client/<id>': 'Delete a client',
+            'POST /save-progress': 'Save weekly progress',
+            'GET /progress/<name>': 'Get progress history',
             'GET /export-csv': 'Export clients to CSV',
-            'GET /progress-chart': 'Generate progress chart'
+            'GET /progress-chart': 'Generate progress chart',
+            'POST /reset-clients': 'Reset all data'
         },
-        'total_clients': len(clients_db)
+        'database': DB_NAME
     })
 
 @app.route('/health')
 def health():
+    # Get client count from database
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) as count FROM clients")
+    clients_count = cur.fetchone()['count']
+    cur.execute("SELECT COUNT(*) as count FROM progress")
+    progress_count = cur.fetchone()['count']
+    conn.close()
+
     return jsonify({
         'status': 'healthy',
         'service': 'aceest-fitness-api',
-        'clients_count': len(clients_db),
+        'version': '2.0.1',
+        'database': DB_NAME,
+        'clients_count': clients_count,
+        'progress_entries': progress_count,
         'timestamp': datetime.now().isoformat()
     })
 
