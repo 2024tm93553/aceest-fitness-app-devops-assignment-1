@@ -1,7 +1,7 @@
 """
 ACEest Fitness App - Comprehensive Unit Tests
 Tests for Flask application endpoints and business logic
-Version: 2.0.1 - Includes SQLite database tests
+Version: 2.1.2 - Simplified SQLite database schema
 """
 
 import pytest
@@ -54,14 +54,12 @@ def reset_clients():
 
 @pytest.fixture
 def sample_client_data():
-    """Sample client data for testing"""
+    """Sample client data for testing (Aceestver-2.1.2 simplified schema)"""
     return {
         'name': 'Test User',
         'age': 25,
         'weight': 70,
-        'program': 'Fat Loss (FL)',
-        'adherence': 80,
-        'notes': 'Test notes'
+        'program': 'Fat Loss (FL)'
     }
 
 
@@ -252,7 +250,7 @@ class TestClientManagement:
                               content_type='application/json')
         data = json.loads(response.data)
         # Weight 70 * Fat Loss factor 22 = 1540
-        assert data['client']['estimated_calories'] == 1540
+        assert data['client']['calories'] == 1540
 
     def test_add_client_missing_name(self, client, reset_clients):
         """Test that missing name returns error"""
@@ -421,7 +419,7 @@ class TestEdgeCases:
                               content_type='application/json')
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data['client']['estimated_calories'] == 0
+        assert data['client']['calories'] == 0
 
     def test_add_client_with_decimal_weight(self, client, reset_clients):
         """Test adding client with decimal weight"""
@@ -436,7 +434,7 @@ class TestEdgeCases:
         assert response.status_code == 200
         data = json.loads(response.data)
         # 72.5 * 22 = 1595
-        assert data['client']['estimated_calories'] == 1595
+        assert data['client']['calories'] == 1595
 
     def test_add_multiple_clients(self, client, reset_clients, sample_client_data):
         """Test adding multiple clients"""
@@ -472,7 +470,7 @@ class TestEdgeCases:
 # ==================== PROGRESS TRACKING TESTS (v2.0.1) ====================
 
 class TestProgressTracking:
-    """Tests for progress tracking feature (from Aceestver2.0.1)"""
+    """Tests for progress tracking feature (from Aceestver-2.1.2)"""
 
     def test_save_progress_success(self, client, reset_clients, sample_client_data):
         """Test successfully saving progress"""
@@ -554,10 +552,10 @@ class TestProgressTracking:
         assert response.status_code == 404
 
 
-# ==================== DATABASE TESTS (v2.0.1) ====================
+# ==================== DATABASE TESTS (v2.1.2) ====================
 
 class TestDatabasePersistence:
-    """Tests for SQLite database persistence (from Aceestver2.0.1)"""
+    """Tests for SQLite database persistence (from Aceestver-2.1.2)"""
 
     def test_database_name_configured(self):
         """Test that database name is configured"""
@@ -570,7 +568,7 @@ class TestDatabasePersistence:
         assert 'database' in data
         assert data['database'] == DB_NAME
         assert 'version' in data
-        assert data['version'] == '2.0.1'
+        assert data['version'] == '2.1.2'
 
     def test_health_shows_progress_count(self, client, reset_clients, sample_client_data):
         """Test that health endpoint shows progress entries count"""

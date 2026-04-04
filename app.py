@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, make_response
 import json
 import csv
@@ -14,7 +13,7 @@ import sqlite3
 app = Flask(__name__)
 app.secret_key = 'aceest-fitness-secret-key-2024'
 
-# Database configuration (from Aceestver2.0.1)
+# Database configuration (from Aceestver-2.1.2)
 DB_NAME = "aceest_fitness.db"
 
 def get_db_connection():
@@ -24,11 +23,11 @@ def get_db_connection():
     return conn
 
 def init_db():
-    """Initialize database tables (from Aceestver2.0.1)"""
+    """Initialize database tables (from Aceestver-2.1.2)"""
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Clients table
+    # Clients table (simplified schema from Aceestver-2.1.2)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS clients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,21 +35,17 @@ def init_db():
             age INTEGER,
             weight REAL,
             program TEXT,
-            calories INTEGER,
-            adherence INTEGER DEFAULT 0,
-            notes TEXT DEFAULT '',
-            created_at TEXT
+            calories INTEGER
         )
     """)
 
-    # Progress tracking table (from Aceestver2.0.1)
+    # Progress tracking table (from Aceestver-2.1.2)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS progress (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_name TEXT,
             week TEXT,
-            adherence INTEGER,
-            recorded_at TEXT
+            adherence INTEGER
         )
     """)
 
@@ -63,20 +58,24 @@ init_db()
 # In-memory cache (for backward compatibility)
 clients_db = []
 
+# Programs data (from Aceestver-2.1.2)
 PROGRAMS = {
     "Fat Loss (FL)": {
+        "factor": 22,
         "workout": "Back Squat, Cardio, Bench, Deadlift, Recovery",
         "diet": "Egg Whites, Chicken, Fish Curry",
         "color": "#e74c3c",
-        "calorie_factor": 22
+        "calorie_factor": 22  # Alias for backward compatibility
     },
     "Muscle Gain (MG)": {
+        "factor": 35,
         "workout": "Squat, Bench, Deadlift, Press, Rows",
         "diet": "Eggs, Biryani, Mutton Curry",
         "color": "#2ecc71",
         "calorie_factor": 35
     },
     "Beginner (BG)": {
+        "factor": 26,
         "workout": "Air Squats, Ring Rows, Push-ups",
         "diet": "Balanced Tamil Meals",
         "color": "#3498db",
@@ -96,7 +95,7 @@ def dashboard():
 
 @app.route('/add-client', methods=['POST'])
 def add_client():
-    """Add a new client (equivalent to save_client in GUI) - Now with SQLite from Aceestver2.0.1"""
+    """Add a new client (equivalent to save_client in Aceestver-2.1.2)"""
     try:
         data = request.get_json() if request.is_json else request.form
 
@@ -104,13 +103,11 @@ def add_client():
         age = int(data.get('age', 0))
         weight = float(data.get('weight', 0))
         program = data.get('program', '')
-        adherence = int(data.get('adherence', 0))
-        notes = data.get('notes', '').strip()
 
         if not name or not program:
             return jsonify({
                 'success': False,
-                'error': 'Name and program are required'
+                'error': 'Name and Program required'
             }), 400
 
         if program not in PROGRAMS:
@@ -119,19 +116,19 @@ def add_client():
                 'error': 'Invalid program selected'
             }), 400
 
-        estimated_calories = int(weight * PROGRAMS[program]['calorie_factor'])
-        created_at = datetime.now().isoformat()
+        # Calculate calories using factor (from Aceestver-2.1.2)
+        calories = int(weight * PROGRAMS[program]['factor'])
 
-        # Save to SQLite database (from Aceestver2.0.1)
+        # Save to SQLite database (from Aceestver-2.1.2)
         conn = get_db_connection()
         cur = conn.cursor()
 
         try:
             cur.execute("""
-                INSERT OR REPLACE INTO clients 
-                (name, age, weight, program, calories, adherence, notes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (name, age, weight, program, estimated_calories, adherence, notes, created_at))
+                INSERT OR REPLACE INTO clients
+                (name, age, weight, program, calories)
+                VALUES (?, ?, ?, ?, ?)
+            """, (name, age, weight, program, calories))
             conn.commit()
             client_id = cur.lastrowid
         except Exception as e:
@@ -149,20 +146,13 @@ def add_client():
             'age': age,
             'weight': weight,
             'program': program,
-            'adherence': adherence,
-            'notes': notes,
-            'estimated_calories': estimated_calories,
-            'created_at': created_at
+            'calories': calories
         }
-
-        # Also update in-memory cache for backward compatibility
-        clients_db.append(client)
 
         return jsonify({
             'success': True,
-            'message': f'Client {name} added successfully',
-            'client': client,
-            'total_clients': len(clients_db)
+            'message': 'Client data saved',
+            'client': client
         })
 
     except (ValueError, TypeError) as e:
@@ -173,7 +163,7 @@ def add_client():
 
 @app.route('/clients')
 def get_clients():
-    """Get all clients from SQLite database (from Aceestver2.0.1)"""
+    """Get all clients from SQLite database (from Aceestver-2.1.2)"""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM clients ORDER BY id DESC")
@@ -188,10 +178,7 @@ def get_clients():
             'age': row['age'],
             'weight': row['weight'],
             'program': row['program'],
-            'adherence': row['adherence'] or 0,
-            'notes': row['notes'] or '',
-            'estimated_calories': row['calories'],
-            'created_at': row['created_at']
+            'calories': row['calories']
         })
 
     return jsonify({
@@ -202,7 +189,7 @@ def get_clients():
 
 @app.route('/client/<int:client_id>')
 def get_client(client_id):
-    """Get specific client details from SQLite (equivalent to load_client in Aceestver2.0.1)"""
+    """Get specific client details from SQLite (from Aceestver-2.1.2)"""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM clients WHERE id=?", (client_id,))
@@ -221,10 +208,7 @@ def get_client(client_id):
         'age': row['age'],
         'weight': row['weight'],
         'program': row['program'],
-        'adherence': row['adherence'] or 0,
-        'notes': row['notes'] or '',
-        'estimated_calories': row['calories'],
-        'created_at': row['created_at']
+        'calories': row['calories']
     }
 
     return jsonify({
@@ -234,7 +218,7 @@ def get_client(client_id):
 
 @app.route('/client/name/<client_name>')
 def get_client_by_name(client_name):
-    """Get client by name from SQLite (equivalent to load_client in Aceestver2.0.1)"""
+    """Get client by name from SQLite (load_client equivalent from Aceestver-2.1.2)"""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM clients WHERE name=?", (client_name,))
@@ -253,10 +237,7 @@ def get_client_by_name(client_name):
         'age': row['age'],
         'weight': row['weight'],
         'program': row['program'],
-        'adherence': row['adherence'] or 0,
-        'notes': row['notes'] or '',
-        'estimated_calories': row['calories'],
-        'created_at': row['created_at']
+        'calories': row['calories']
     }
 
     return jsonify({
@@ -296,11 +277,11 @@ def delete_client(client_id):
         'message': f'Client {client_name} deleted successfully'
     })
 
-# ============== PROGRESS TRACKING (from Aceestver2.0.1) ==============
+# ============== PROGRESS TRACKING (from Aceestver-2.1.2) ==============
 
 @app.route('/save-progress', methods=['POST'])
 def save_progress():
-    """Save weekly progress (equivalent to save_progress in Aceestver2.0.1)"""
+    """Save weekly progress (equivalent to save_progress in Aceestver-2.1.2)"""
     try:
         data = request.get_json() if request.is_json else request.form
 
@@ -314,15 +295,15 @@ def save_progress():
             }), 400
 
         week = datetime.now().strftime("Week %U - %Y")
-        recorded_at = datetime.now().isoformat()
 
         conn = get_db_connection()
         cur = conn.cursor()
 
+        # Insert progress (simplified schema from Aceestver-2.1.2)
         cur.execute("""
-            INSERT INTO progress (client_name, week, adherence, recorded_at)
-            VALUES (?, ?, ?, ?)
-        """, (client_name, week, adherence, recorded_at))
+            INSERT INTO progress (client_name, week, adherence)
+            VALUES (?, ?, ?)
+        """, (client_name, week, adherence))
 
         conn.commit()
         conn.close()
@@ -342,13 +323,13 @@ def save_progress():
 
 @app.route('/progress/<client_name>')
 def get_progress(client_name):
-    """Get progress history for a client"""
+    """Get progress history for a client (from Aceestver-2.1.2)"""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
         SELECT * FROM progress 
         WHERE client_name=? 
-        ORDER BY recorded_at DESC
+        ORDER BY id DESC
     """, (client_name,))
     rows = cur.fetchall()
     conn.close()
@@ -358,8 +339,7 @@ def get_progress(client_name):
         progress_history.append({
             'id': row['id'],
             'week': row['week'],
-            'adherence': row['adherence'],
-            'recorded_at': row['recorded_at']
+            'adherence': row['adherence']
         })
 
     return jsonify({
@@ -371,8 +351,15 @@ def get_progress(client_name):
 
 @app.route('/export-csv')
 def export_csv():
-    """Export clients to CSV (equivalent to GUI export function)"""
-    if not clients_db:
+    """Export clients to CSV (from Aceestver-2.1.2 - uses SQLite)"""
+    # Get clients from database
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM clients ORDER BY id")
+    rows = cur.fetchall()
+    conn.close()
+
+    if not rows:
         return jsonify({
             'success': False,
             'error': 'No clients to export'
@@ -382,20 +369,17 @@ def export_csv():
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Write header
-    writer.writerow(['Name', 'Age', 'Weight', 'Program', 'Adherence', 'Notes', 'Estimated Calories', 'Created At'])
+    # Write header (simplified for Aceestver-2.1.2)
+    writer.writerow(['Name', 'Age', 'Weight', 'Program', 'Calories'])
 
     # Write client data
-    for client in clients_db:
+    for row in rows:
         writer.writerow([
-            client['name'],
-            client['age'],
-            client['weight'],
-            client['program'],
-            client['adherence'],
-            client['notes'],
-            client['estimated_calories'],
-            client['created_at']
+            row['name'],
+            row['age'],
+            row['weight'],
+            row['program'],
+            row['calories']
         ])
 
     response = make_response(output.getvalue())
@@ -406,7 +390,15 @@ def export_csv():
 
 @app.route('/progress-chart')
 def progress_chart():
-    if not clients_db:
+    """Generate progress chart from database (from Aceestver-2.1.2)"""
+    # Get clients and their latest progress from database
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM clients ORDER BY id")
+    clients = cur.fetchall()
+    conn.close()
+
+    if not clients:
         return jsonify({
             'success': False,
             'error': 'No client data available'
@@ -415,19 +407,32 @@ def progress_chart():
     try:
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        names = [client['name'][:15] for client in clients_db]  # Limit name length
-        adherence = [client['adherence'] for client in clients_db]
+        names = [client['name'][:15] for client in clients]  # Limit name length
+        # Get latest adherence from progress table for each client
+        adherence_values = []
+        colors = []
 
-        colors = [PROGRAMS[client['program']]['color'] for client in clients_db]
+        conn = get_db_connection()
+        cur = conn.cursor()
+        for client in clients:
+            cur.execute("""
+                SELECT adherence FROM progress 
+                WHERE client_name=? 
+                ORDER BY id DESC LIMIT 1
+            """, (client['name'],))
+            row = cur.fetchone()
+            adherence_values.append(row['adherence'] if row else 0)
+            colors.append(PROGRAMS[client['program']]['color'])
+        conn.close()
 
-        bars = ax.bar(names, adherence, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
+        bars = ax.bar(names, adherence_values, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
 
         ax.set_ylabel('Adherence %', fontsize=12, fontweight='bold')
         ax.set_title('Client Progress - Weekly Adherence', fontsize=14, fontweight='bold', pad=20)
         ax.set_ylim(0, 100)
         ax.grid(axis='y', alpha=0.3, linestyle='--')
 
-        for bar, value in zip(bars, adherence):
+        for bar, value in zip(bars, adherence_values):
             height = bar.get_height()
             ax.text(bar.get_x() + bar.get_width()/2., height + 1,
                    f'{value}%', ha='center', va='bottom', fontweight='bold')
@@ -445,7 +450,7 @@ def progress_chart():
         return jsonify({
             'success': True,
             'chart_data': f'data:image/png;base64,{img_base64}',
-            'client_count': len(clients_db)
+            'client_count': len(clients)
         })
 
     except Exception as e:
@@ -480,12 +485,13 @@ def home():
     return jsonify({
         'service': 'ACEest Fitness & Gym Management API',
         'status': 'running',
-        'version': '2.0.1',
-        'description': 'DevOps Assignment - Flask App with SQLite Database (based on Aceestver2.0.1)',
+        'version': '2.1.2',
+        'description': 'DevOps Assignment - Flask App with SQLite Database (based on Aceestver-2.1.2)',
         'features': [
             'SQLite database persistence',
             'Progress tracking',
-            'Client management'
+            'Client management',
+            'Simplified schema'
         ],
         'available_programs': list(PROGRAMS.keys()),
         'endpoints': {
@@ -523,7 +529,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'aceest-fitness-api',
-        'version': '2.0.1',
+        'version': '2.1.2',
         'database': DB_NAME,
         'clients_count': clients_count,
         'progress_entries': progress_count,
