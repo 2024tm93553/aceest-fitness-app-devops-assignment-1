@@ -49,12 +49,7 @@ COPY static/ static/
 RUN groupadd --gid 1000 appgroup && \
     useradd --uid 1000 --gid appgroup --shell /bin/false --create-home appuser && \
     chown -R appuser:appgroup /app && \
-    # Security: Remove write permissions where not needed
-    chmod -R 555 /app && \
-    # Create writable directory for SQLite database
-    mkdir -p /app/data && \
-    chown appuser:appgroup /app/data && \
-    chmod 755 /app/data
+    chmod 755 /app
 
 
 USER appuser
