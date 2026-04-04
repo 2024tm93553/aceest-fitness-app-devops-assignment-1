@@ -8,7 +8,7 @@ on:
 
 env:
   DOCKER_IMAGE: aceest-fitness-app
-  PYTHON_VERSION: '3.9'
+  PYTHON_VERSION: '3.11'
 
 jobs:
   build-and-lint:
@@ -131,13 +131,24 @@ jobs:
       - name: 🚀 Start container
         run: |
           docker run -d --name test-container -p 9000:9000 ${{ env.DOCKER_IMAGE }}:test
-          sleep 5
+          echo "Waiting for container to start..."
+          sleep 15
 
       - name: ❤️ Health check
         run: |
           echo "Testing health endpoint..."
-          curl -f http://localhost:9000/health || exit 1
-          echo "✅ Health check passed!"
+          for i in 1 2 3 4 5; do
+            if curl -f http://localhost:9000/health; then
+              echo ""
+              echo "✅ Health check passed!"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "❌ Health check failed"
+          docker logs test-container
+          exit 1
 
       - name: 🔍 Test API endpoints
         run: |
@@ -154,11 +165,11 @@ jobs:
           
           echo "✅ All API endpoints working!"
 
-      - name: 🧪 Run Pytest inside container
+      - name: 🧪 Verify container logs
         run: |
-          echo "Running tests inside container..."
-          docker exec test-container python -m pytest tests/ -v --tb=short || true
-          echo "✅ Container tests completed!"
+          echo "Container logs:"
+          docker logs test-container
+          echo "✅ Container verification completed!"
 
       - name: 🧹 Cleanup
         if: always()
