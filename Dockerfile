@@ -1,32 +1,69 @@
-FROM python:3.9-slim
+FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --target=/build/deps -r requirements.txt
+
+FROM python:3.11-slim AS production
+
+LABEL org.opencontainers.image.title="ACEest Fitness App" \
+      org.opencontainers.image.description="Fitness & Gym Management API" \
+      org.opencontainers.image.version="2.0.1" \
+      org.opencontainers.image.vendor="BITS Pilani" \
+      org.opencontainers.image.authors="2024tm93553"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/deps \
     FLASK_APP=app.py \
-    FLASK_ENV=production
+    FLASK_ENV=production \
+    # Security: Disable Python's hash randomization for reproducibility
+    PYTHONHASHSEED=random
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean \
+    && apt-get autoremove -y
 
-COPY requirements.txt .
-
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=builder /build/deps /app/deps
 
 COPY app.py .
 COPY templates/ templates/
 COPY static/ static/
 
-RUN useradd --create-home --shell /bin/bash appuser && \
-    chown -R appuser:appuser /app
+RUN groupadd --gid 1000 appgroup && \
+    useradd --uid 1000 --gid appgroup --shell /bin/false --create-home appuser && \
+    chown -R appuser:appgroup /app && \
+    # Security: Remove write permissions where not needed
+    chmod -R 555 /app && \
+    # Create writable directory for SQLite database
+    mkdir -p /app/data && \
+    chown appuser:appgroup /app/data && \
+    chmod 755 /app/data
+
+
 USER appuser
+
 
 EXPOSE 9000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')" || exit 1
+    CMD curl -f http://localhost:9000/health || exit 1
 
 CMD ["python", "app.py"]
 
