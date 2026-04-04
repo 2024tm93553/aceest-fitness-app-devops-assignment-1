@@ -1,6 +1,7 @@
 """
 ACEest Fitness App - Comprehensive Unit Tests
 Tests for Flask application endpoints and business logic
+Version: 2.0.1 - Includes SQLite database tests
 """
 
 import pytest
@@ -12,28 +13,42 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app as app_module
-from app import app, PROGRAMS
+from app import app, PROGRAMS, DB_NAME, get_db_connection
 
 
 # ==================== FIXTURES ====================
+
+def reset_database():
+    """Helper to reset SQLite database"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM clients")
+    cur.execute("DELETE FROM progress")
+    conn.commit()
+    conn.close()
+
 
 @pytest.fixture
 def client():
     """Create a test client for the Flask application"""
     app.config['TESTING'] = True
-    # Reset clients before each test
+    # Reset database and in-memory cache before each test
+    reset_database()
     app_module.clients_db.clear()
     with app.test_client() as test_client:
         yield test_client
     # Cleanup after test
+    reset_database()
     app_module.clients_db.clear()
 
 
 @pytest.fixture
 def reset_clients():
     """Reset clients database before each test"""
+    reset_database()
     app_module.clients_db.clear()
     yield
+    reset_database()
     app_module.clients_db.clear()
 
 
@@ -452,6 +467,125 @@ class TestEdgeCases:
                               }),
                               content_type='application/json')
         assert response.status_code == 200
+
+
+# ==================== PROGRESS TRACKING TESTS (v2.0.1) ====================
+
+class TestProgressTracking:
+    """Tests for progress tracking feature (from Aceestver2.0.1)"""
+
+    def test_save_progress_success(self, client, reset_clients, sample_client_data):
+        """Test successfully saving progress"""
+        # First add a client
+        client.post('/add-client',
+                   data=json.dumps(sample_client_data),
+                   content_type='application/json')
+
+        # Save progress for the client
+        response = client.post('/save-progress',
+                              data=json.dumps({
+                                  'client_name': 'Test User',
+                                  'adherence': 85
+                              }),
+                              content_type='application/json')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['success'] == True
+        assert data['adherence'] == 85
+        assert 'week' in data
+
+    def test_save_progress_missing_client_name(self, client, reset_clients):
+        """Test that missing client name returns error"""
+        response = client.post('/save-progress',
+                              data=json.dumps({
+                                  'adherence': 80
+                              }),
+                              content_type='application/json')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert data['success'] == False
+
+    def test_get_progress_history(self, client, reset_clients, sample_client_data):
+        """Test getting progress history for a client"""
+        # Add a client
+        client.post('/add-client',
+                   data=json.dumps(sample_client_data),
+                   content_type='application/json')
+
+        # Save progress multiple times
+        client.post('/save-progress',
+                   data=json.dumps({'client_name': 'Test User', 'adherence': 75}),
+                   content_type='application/json')
+        client.post('/save-progress',
+                   data=json.dumps({'client_name': 'Test User', 'adherence': 80}),
+                   content_type='application/json')
+
+        # Get progress history
+        response = client.get('/progress/Test User')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['success'] == True
+        assert data['total_entries'] == 2
+
+    def test_get_progress_empty_history(self, client, reset_clients):
+        """Test getting progress for client with no history"""
+        response = client.get('/progress/NonExistent')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['total_entries'] == 0
+
+    def test_get_client_by_name(self, client, reset_clients, sample_client_data):
+        """Test getting a client by name (load_client equivalent)"""
+        # Add a client
+        client.post('/add-client',
+                   data=json.dumps(sample_client_data),
+                   content_type='application/json')
+
+        # Get client by name
+        response = client.get('/client/name/Test User')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['success'] == True
+        assert data['client']['name'] == 'Test User'
+
+    def test_get_nonexistent_client_by_name(self, client, reset_clients):
+        """Test getting a non-existent client by name"""
+        response = client.get('/client/name/Nobody')
+        assert response.status_code == 404
+
+
+# ==================== DATABASE TESTS (v2.0.1) ====================
+
+class TestDatabasePersistence:
+    """Tests for SQLite database persistence (from Aceestver2.0.1)"""
+
+    def test_database_name_configured(self):
+        """Test that database name is configured"""
+        assert DB_NAME == "aceest_fitness.db"
+
+    def test_health_shows_database_info(self, client, reset_clients):
+        """Test that health endpoint shows database information"""
+        response = client.get('/health')
+        data = json.loads(response.data)
+        assert 'database' in data
+        assert data['database'] == DB_NAME
+        assert 'version' in data
+        assert data['version'] == '2.0.1'
+
+    def test_health_shows_progress_count(self, client, reset_clients, sample_client_data):
+        """Test that health endpoint shows progress entries count"""
+        # Add client and progress
+        client.post('/add-client',
+                   data=json.dumps(sample_client_data),
+                   content_type='application/json')
+        client.post('/save-progress',
+                   data=json.dumps({'client_name': 'Test User', 'adherence': 90}),
+                   content_type='application/json')
+
+        response = client.get('/health')
+        data = json.loads(response.data)
+        assert 'progress_entries' in data
+        assert data['progress_entries'] >= 1
 
 
 if __name__ == '__main__':
