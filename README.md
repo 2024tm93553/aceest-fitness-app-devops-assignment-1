@@ -430,7 +430,7 @@ The pipeline (`.github/workflows/main.yml`) is triggered on:
    - Script Path: `Jenkinsfile`
 
 3. **Build Triggers**
-   - Poll SCM: `H/5 * * * *` (every 5 minutes)
+  - Poll SCM: `H/2 * * * *` (every ~2 minutes)
    - Or use GitHub webhook for instant builds
 
 ### Jenkinsfile Stages
@@ -438,15 +438,26 @@ The pipeline (`.github/workflows/main.yml`) is triggered on:
 ```groovy
 pipeline {
     stages {
-        stage('Checkout')     // Pull latest code
-        stage('Setup')        // Install dependencies
-        stage('Lint')         // Code quality check
-        stage('Test')         // Run pytest suite
-        stage('Build Docker') // Build container image
-        stage('Deploy')       // Deploy to environment
+    stage('Checkout')                     // Pull latest code
+    stage('Resolve Version Metadata')     // Read app version + build info
+    stage('Setup Python Environment')     // Install dependencies
+    stage('Lint & Syntax Check')          // Python compile checks
+    stage('Unit Tests')                   // Run pytest + JUnit report
+    stage('Create Versioned Build Artifact')
+    stage('Build Docker Image')           // Build + tag image
+    stage('Test Docker Container')        // Smoke-test /health
+    stage('Quality Gate')                 // Required-file validation
+    stage('Cleanup')                      // Remove dangling images
     }
 }
 ```
+
+### Build Artifacts (Step 4 requirement)
+
+- Versioned archive: `aceest-fitness-app-v<app_version>-b<build_number>.tar.gz`
+- Build metadata: `artifacts/build-info.txt`
+- Test report: `reports/pytest-results.xml`
+- All artifacts are archived in Jenkins for each build.
 
 ### Running Jenkins Locally
 
