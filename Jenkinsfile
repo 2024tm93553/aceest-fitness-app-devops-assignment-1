@@ -129,13 +129,12 @@ pipeline {
             steps {
                 echo 'Running container smoke test...'
                 sh '''
-                    docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} -p 9001:9000 ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} ${DOCKER_IMAGE}:${DOCKER_TAG}
 
                     sleep 5
 
-                    curl -f http://localhost:9001/health || exit 1
-
-                    echo "Container health check passed"
+                    docker exec ${APP_NAME}-test-${BUILD_NUMBER} \
+                        python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:9000/health', timeout=5); print('Health check passed')"
                 '''
             }
             post {
