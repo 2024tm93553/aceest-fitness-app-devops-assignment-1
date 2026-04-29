@@ -1,8 +1,15 @@
 pipeline {
     agent any
 
+    parameters {
+        string(
+            name: 'IMAGE_VERSION',
+            defaultValue: '',
+            description: 'Docker image version tag (e.g. 2.0.1). Leave blank to use the build number.'
+        )
+    }
+
     triggers {
-        // Poll Git for changes so builds auto-trigger even without webhook setup.
         pollSCM('H/2 * * * *')
     }
 
@@ -13,11 +20,11 @@ pipeline {
     }
 
     environment {
-        APP_NAME = 'aceest-fitness-app'
+        APP_NAME    = 'aceest-fitness-app'
         DOCKER_IMAGE = 'aceest-fitness-app'
         DOCKER_REGISTRY = 'docker.io'
-        DOCKER_TAG = "${BUILD_NUMBER}"
-        APP_VERSION = 'unknown'
+        APP_VERSION = "${params.IMAGE_VERSION ?: env.BUILD_NUMBER}"
+        DOCKER_TAG  = "${APP_NAME}-v${APP_VERSION}"
     }
 
     stages {
@@ -28,24 +35,19 @@ pipeline {
             }
         }
 
-        stage('Resolve Version Metadata') {
+        stage('Prepare') {
             steps {
                 sh 'mkdir -p artifacts reports'
-                sh 'python3 scripts/get_version.py > artifacts/version.txt'
-                script {
-                    env.APP_VERSION = readFile('artifacts/version.txt').trim()
-                    if (!env.APP_VERSION) { env.APP_VERSION = '0.0.0' }
-                    echo "App version: ${env.APP_VERSION}"
-                }
                 sh '''
                     cat > artifacts/build-info.txt <<EOF
 Build Number: ${BUILD_NUMBER}
-Build URL: ${BUILD_URL}
-Git Commit: ${GIT_COMMIT}
-Git Branch: ${GIT_BRANCH}
 App Version: ${APP_VERSION}
-Build Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+Docker Tag:  ${DOCKER_TAG}
+Git Commit:  ${GIT_COMMIT}
+Git Branch:  ${GIT_BRANCH}
+Build Time:  $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
+                    cat artifacts/build-info.txt
                 '''
             }
         }
@@ -111,11 +113,8 @@ EOF
             steps {
                 echo 'Building Docker image...'
                 sh '''
-                    command -v docker >/dev/null 2>&1
-
                     docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
-                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:v${APP_VERSION}
-                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                    echo "Built: ${DOCKER_IMAGE}:${DOCKER_TAG}"
                 '''
             }
         }
@@ -124,8 +123,7 @@ EOF
             steps {
                 echo 'Running container smoke test...'
                 sh '''
-                    docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} ${DOCKER_IMAGE}:${DOCKER_TAG}
-
+                        docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} ${DOCKER_IMAGE}:${DOCKER_TAG} \
                     sleep 5
 
                     docker exec ${APP_NAME}-test-${BUILD_NUMBER} \
@@ -148,15 +146,13 @@ EOF
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKERHUB_USERNAME', passwordVariable: 'DOCKERHUB_TOKEN')]) {
                     sh '''
                         DOCKERHUB_REPO="${DOCKER_REGISTRY}/${DOCKERHUB_USERNAME}/${APP_NAME}"
-                        VERSIONED_TAG="${APP_NAME}-v${APP_VERSION}-${BUILD_NUMBER}"
 
                         echo "${DOCKERHUB_TOKEN}" | docker login ${DOCKER_REGISTRY} -u "${DOCKERHUB_USERNAME}" --password-stdin
 
-                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:${VERSIONED_TAG}
+                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:${DOCKER_TAG}
+                        docker push ${DOCKERHUB_REPO}:${DOCKER_TAG}
 
-                        docker push ${DOCKERHUB_REPO}:${VERSIONED_TAG}
-
-                        echo "Pushed: ${DOCKERHUB_REPO}:${VERSIONED_TAG}"
+                        echo "Pushed: ${DOCKERHUB_REPO}:${DOCKER_TAG}"
 
                         docker logout ${DOCKER_REGISTRY}
                     '''
