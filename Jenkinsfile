@@ -123,7 +123,8 @@ EOF
             steps {
                 echo 'Running container smoke test...'
                 sh '''
-                        docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} ${DOCKER_IMAGE}:${DOCKER_TAG} \
+                    docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} ${DOCKER_IMAGE}:${DOCKER_TAG}
+
                     sleep 5
 
                     docker exec ${APP_NAME}-test-${BUILD_NUMBER} \
