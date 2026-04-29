@@ -1,8 +1,15 @@
 pipeline {
     agent any
 
+    parameters {
+        string(
+            name: 'IMAGE_VERSION',
+            defaultValue: '2.0.1',
+            description: 'Docker image version tag (e.g. 2.0.1). Leave blank to use the build number.'
+        )
+    }
+
     triggers {
-        // Poll Git for changes so builds auto-trigger even without webhook setup.
         pollSCM('H/2 * * * *')
     }
 
@@ -13,11 +20,11 @@ pipeline {
     }
 
     environment {
-        APP_NAME = 'aceest-fitness-app'
+        APP_NAME    = 'aceest-fitness-app'
         DOCKER_IMAGE = 'aceest-fitness-app'
         DOCKER_REGISTRY = 'docker.io'
-        DOCKER_TAG = "${BUILD_NUMBER}"
-        APP_VERSION = 'unknown'
+        APP_VERSION = "${params.IMAGE_VERSION ?: env.BUILD_NUMBER}"
+        DOCKER_TAG  = "${APP_NAME}-v${APP_VERSION}"
     }
 
     stages {
@@ -28,29 +35,19 @@ pipeline {
             }
         }
 
-        stage('Resolve Version Metadata') {
+        stage('Prepare') {
             steps {
-                script {
-                    env.APP_VERSION = sh(
-                        script: "grep -E \"'version':\" app.py | head -1 | sed -E \"s/.*'version': '([^']+)'.*/\\1/\"",
-                        returnStdout: true
-                    ).trim()
-
-                    if (!env.APP_VERSION) {
-                        env.APP_VERSION = "0.0.0"
-                    }
-                }
-
+                sh 'mkdir -p artifacts reports'
                 sh '''
-                    mkdir -p artifacts reports
                     cat > artifacts/build-info.txt <<EOF
-                    Build Number: ${BUILD_NUMBER}
-                    Build URL: ${BUILD_URL}
-                    Git Commit: ${GIT_COMMIT}
-                    Git Branch: ${GIT_BRANCH}
-                    App Version: ${APP_VERSION}
-                    Build Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                    EOF
+Build Number: ${BUILD_NUMBER}
+App Version: ${APP_VERSION}
+Docker Tag:  ${DOCKER_TAG}
+Git Commit:  ${GIT_COMMIT}
+Git Branch:  ${GIT_BRANCH}
+Build Time:  $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+                    cat artifacts/build-info.txt
                 '''
             }
         }
@@ -60,7 +57,7 @@ pipeline {
                 echo 'Setting up Python environment...'
                 sh '''
                     python3 -m venv venv
-                    venv/bin/pip install --upgrade pip
+                    venv/bin/pip install --upgrade pip setuptools wheel
                     venv/bin/pip install -r requirements.txt
                 '''
             }
@@ -116,11 +113,8 @@ pipeline {
             steps {
                 echo 'Building Docker image...'
                 sh '''
-                    command -v docker >/dev/null 2>&1
-
                     docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
-                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:v${APP_VERSION}
-                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                    echo "Built: ${DOCKER_IMAGE}:${DOCKER_TAG}"
                 '''
             }
         }
@@ -129,13 +123,12 @@ pipeline {
             steps {
                 echo 'Running container smoke test...'
                 sh '''
-                    docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} -p 9001:9000 ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} ${DOCKER_IMAGE}:${DOCKER_TAG}
 
                     sleep 5
 
-                    curl -f http://localhost:9001/health || exit 1
-
-                    echo "Container health check passed"
+                    docker exec ${APP_NAME}-test-${BUILD_NUMBER} \
+                        python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:9000/health', timeout=5); print('Health check passed')"
                 '''
             }
             post {
@@ -157,13 +150,10 @@ pipeline {
 
                         echo "${DOCKERHUB_TOKEN}" | docker login ${DOCKER_REGISTRY} -u "${DOCKERHUB_USERNAME}" --password-stdin
 
-                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:build-${BUILD_NUMBER}
-                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:v${APP_VERSION}
-                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:latest
+                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:${DOCKER_TAG}
+                        docker push ${DOCKERHUB_REPO}:${DOCKER_TAG}
 
-                        docker push ${DOCKERHUB_REPO}:build-${BUILD_NUMBER}
-                        docker push ${DOCKERHUB_REPO}:v${APP_VERSION}
-                        docker push ${DOCKERHUB_REPO}:latest
+                        echo "Pushed: ${DOCKERHUB_REPO}:${DOCKER_TAG}"
 
                         docker logout ${DOCKER_REGISTRY}
                     '''
