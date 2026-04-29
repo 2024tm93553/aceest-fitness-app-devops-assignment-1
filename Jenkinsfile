@@ -30,26 +30,22 @@ pipeline {
 
         stage('Resolve Version Metadata') {
             steps {
+                sh 'mkdir -p artifacts reports'
+                sh 'python3 scripts/get_version.py > artifacts/version.txt'
                 script {
-                    def extracted = sh(
-                        script: "python3 -c \"import re; content=open('app.py').read(); m=re.search(r\\\"'version':\\\\s*'([^']+)'\\\", content); print(m.group(1) if m else '0.0.0')\"",
-                        returnStdout: true
-                    ).trim()
-
-                    env.APP_VERSION = (extracted && extracted != '') ? extracted : "0.0.0"
-                    echo "App version resolved: ${env.APP_VERSION}"
+                    env.APP_VERSION = readFile('artifacts/version.txt').trim()
+                    if (!env.APP_VERSION) { env.APP_VERSION = '0.0.0' }
+                    echo "App version: ${env.APP_VERSION}"
                 }
-
                 sh '''
-                    mkdir -p artifacts reports
                     cat > artifacts/build-info.txt <<EOF
-                    Build Number: ${BUILD_NUMBER}
-                    Build URL: ${BUILD_URL}
-                    Git Commit: ${GIT_COMMIT}
-                    Git Branch: ${GIT_BRANCH}
-                    App Version: ${APP_VERSION}
-                    Build Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                    EOF
+Build Number: ${BUILD_NUMBER}
+Build URL: ${BUILD_URL}
+Git Commit: ${GIT_COMMIT}
+Git Branch: ${GIT_BRANCH}
+App Version: ${APP_VERSION}
+Build Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
                 '''
             }
         }
