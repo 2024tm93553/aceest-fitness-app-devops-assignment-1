@@ -59,9 +59,20 @@ pipeline {
             steps {
                 echo 'Setting up Python environment...'
                 sh '''
+                    set -e
+
+                    # Install dependencies if missing
+                    if [ "$(id -u)" -eq 0 ]; then
+                        apt-get update && apt-get install -y python3-venv python3-pip
+                    else
+                        sudo apt-get update && sudo apt-get install -y python3-venv python3-pip
+                    fi
+
                     python3 --version
-                    pip3 install --upgrade pip
-                    pip3 install -r requirements.txt
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
                 '''
             }
         }
@@ -70,7 +81,7 @@ pipeline {
             steps {
                 echo 'Running syntax checks...'
                 sh '''
-                    python3 -m py_compile app.py gui_app.py
+                    venv/bin/python -m py_compile app.py gui_app.py
                     echo "Syntax check passed"
                 '''
             }
@@ -80,7 +91,8 @@ pipeline {
             steps {
                 echo 'Running unit tests with pytest...'
                 sh '''
-                    python3 -m pytest tests/ -v --tb=short --junitxml=reports/pytest-results.xml
+                    export PYTHONPATH=$PYTHONPATH:.
+                    venv/bin/pytest tests/ -v --tb=short --junitxml=reports/pytest-results.xml --cov=. --cov-report=xml
                 '''
             }
             post {
