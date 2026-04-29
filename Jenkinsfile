@@ -4,7 +4,7 @@ pipeline {
     parameters {
         string(
             name: 'IMAGE_VERSION',
-            defaultValue: '',
+            defaultValue: '2.0.1',
             description: 'Docker image version tag (e.g. 2.0.1). Leave blank to use the build number.'
         )
     }
