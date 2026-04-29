@@ -32,7 +32,7 @@ pipeline {
             steps {
                 script {
                     def extracted = sh(
-                        script: "grep -E \"'version':\" app.py | head -1 | sed -E \"s/.*'version': '([^']+)'.*/\\1/\"",
+                        script: "python3 -c \"import re; content=open('app.py').read(); m=re.search(r\\\"'version':\\\\s*'([^']+)'\\\", content); print(m.group(1) if m else '0.0.0')\"",
                         returnStdout: true
                     ).trim()
 
