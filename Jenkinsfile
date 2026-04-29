@@ -15,6 +15,7 @@ pipeline {
     environment {
         APP_NAME = 'aceest-fitness-app'
         DOCKER_IMAGE = 'aceest-fitness-app'
+        DOCKER_REGISTRY = 'docker.io'
         DOCKER_TAG = "${BUILD_NUMBER}"
         APP_VERSION = 'unknown'
     }
@@ -141,6 +142,29 @@ pipeline {
                     sh '''
                         docker stop ${APP_NAME}-test-${BUILD_NUMBER} || true
                         docker rm ${APP_NAME}-test-${BUILD_NUMBER} || true
+                    '''
+                }
+            }
+        }
+
+        stage('Push Docker Image to Docker Hub') {
+            steps {
+                echo 'Publishing versioned Docker image tags to Docker Hub...'
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKERHUB_USERNAME', passwordVariable: 'DOCKERHUB_TOKEN')]) {
+                    sh '''
+                        DOCKERHUB_REPO="${DOCKER_REGISTRY}/${DOCKERHUB_USERNAME}/${APP_NAME}"
+
+                        echo "${DOCKERHUB_TOKEN}" | docker login ${DOCKER_REGISTRY} -u "${DOCKERHUB_USERNAME}" --password-stdin
+
+                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:build-${BUILD_NUMBER}
+                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:v${APP_VERSION}
+                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:latest
+
+                        docker push ${DOCKERHUB_REPO}:build-${BUILD_NUMBER}
+                        docker push ${DOCKERHUB_REPO}:v${APP_VERSION}
+                        docker push ${DOCKERHUB_REPO}:latest
+
+                        docker logout ${DOCKER_REGISTRY}
                     '''
                 }
             }
