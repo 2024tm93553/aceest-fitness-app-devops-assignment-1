@@ -59,20 +59,9 @@ pipeline {
             steps {
                 echo 'Setting up Python environment...'
                 sh '''
-                    set -e
-
-                    # Install dependencies if missing
-                    if [ "$(id -u)" -eq 0 ]; then
-                        apt-get update && apt-get install -y python3-venv python3-pip
-                    else
-                        sudo apt-get update && sudo apt-get install -y python3-venv python3-pip
-                    fi
-
-                    python3 --version
                     python3 -m venv venv
-                    . venv/bin/activate
-                    pip install --upgrade pip
-                    pip install -r requirements.txt
+                    venv/bin/pip install --upgrade pip
+                    venv/bin/pip install -r requirements.txt
                 '''
             }
         }
