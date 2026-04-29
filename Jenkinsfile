@@ -31,14 +31,13 @@ pipeline {
         stage('Resolve Version Metadata') {
             steps {
                 script {
-                    env.APP_VERSION = sh(
+                    def extracted = sh(
                         script: "grep -E \"'version':\" app.py | head -1 | sed -E \"s/.*'version': '([^']+)'.*/\\1/\"",
                         returnStdout: true
                     ).trim()
 
-                    if (!env.APP_VERSION) {
-                        env.APP_VERSION = "0.0.0"
-                    }
+                    env.APP_VERSION = (extracted && extracted != '') ? extracted : "0.0.0"
+                    echo "App version resolved: ${env.APP_VERSION}"
                 }
 
                 sh '''
@@ -153,18 +152,15 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKERHUB_USERNAME', passwordVariable: 'DOCKERHUB_TOKEN')]) {
                     sh '''
                         DOCKERHUB_REPO="${DOCKER_REGISTRY}/${DOCKERHUB_USERNAME}/${APP_NAME}"
-                        VERSIONED_TAG="v${APP_VERSION}-build-${BUILD_NUMBER}"
+                        VERSIONED_TAG="${APP_NAME}-v${APP_VERSION}-${BUILD_NUMBER}"
 
                         echo "${DOCKERHUB_TOKEN}" | docker login ${DOCKER_REGISTRY} -u "${DOCKERHUB_USERNAME}" --password-stdin
 
                         docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:${VERSIONED_TAG}
-                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:latest
 
                         docker push ${DOCKERHUB_REPO}:${VERSIONED_TAG}
-                        docker push ${DOCKERHUB_REPO}:latest
 
                         echo "Pushed: ${DOCKERHUB_REPO}:${VERSIONED_TAG}"
-                        echo "Pushed: ${DOCKERHUB_REPO}:latest"
 
                         docker logout ${DOCKER_REGISTRY}
                     '''
