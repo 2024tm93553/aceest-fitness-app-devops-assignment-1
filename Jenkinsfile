@@ -1,8 +1,28 @@
 pipeline {
     agent any
 
-    // No manual IMAGE_VERSION parameter – version is read from the VERSION file in each branch.
-    // Jenkins Multibranch Pipeline auto-discovers all feature/*, develop, and main branches.
+    // Single Parameterized Pipeline – pick any branch at build time.
+    // Version is read automatically from the VERSION file in the chosen branch.
+
+    parameters {
+        choice(
+            name: 'BUILD_BRANCH',
+            choices: [
+                'develop',
+                'main',
+                'feature/aceestver-1.0',
+                'feature/aceestver-1.1',
+                'feature/aceestver-1.1.2',
+                'feature/aceestver-2.1.2',
+                'feature/aceestver-2.2.1',
+                'feature/aceestver-2.2.4',
+                'feature/aceestver-3.0.1',
+                'feature/aceestver-3.1.2',
+                'feature/aceestver-3.2.4'
+            ],
+            description: 'Select the branch to build and deploy'
+        )
+    }
 
     triggers {
         pollSCM('H/2 * * * *')
@@ -23,24 +43,32 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo 'Pulling latest code from Git...'
-                checkout scm
+                echo "Checking out branch: ${params.BUILD_BRANCH}"
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: "refs/heads/${params.BUILD_BRANCH}"]],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/2024tm93553/aceest-fitness-app-devops-assignment-1.git',
+                        credentialsId: 'github-credentials'
+                    ]]
+                ])
             }
         }
 
         stage('Read Version') {
             steps {
                 script {
-                    // Read semantic version from the VERSION file committed in each branch
+                    // Read semantic version from the VERSION file in the checked-out branch
                     env.APP_VERSION = readFile('VERSION').trim()
+                    env.BUILD_BRANCH = params.BUILD_BRANCH
 
-                    // Determine Docker tag suffix by branch type:
+                    // Determine Docker tag suffix from the selected branch:
                     //   main            → v3.2.4          (no suffix, also tags :latest)
                     //   develop         → v3.2.4-dev
-                    //   feature/aceest* → v3.2.4-feature
-                    if (env.BRANCH_NAME == 'main') {
+                    //   feature/*       → v3.2.4-feature
+                    if (params.BUILD_BRANCH == 'main') {
                         env.DOCKER_SUFFIX = ''
-                    } else if (env.BRANCH_NAME == 'develop') {
+                    } else if (params.BUILD_BRANCH == 'develop') {
                         env.DOCKER_SUFFIX = '-dev'
                     } else {
                         env.DOCKER_SUFFIX = '-feature'
@@ -48,7 +76,7 @@ pipeline {
 
                     env.VERSIONED_TAG = "v${env.APP_VERSION}${env.DOCKER_SUFFIX}"
 
-                    echo "Branch       : ${env.BRANCH_NAME}"
+                    echo "Branch       : ${params.BUILD_BRANCH}"
                     echo "App version  : ${env.APP_VERSION}"
                     echo "Versioned tag: ${env.VERSIONED_TAG}"
                 }
@@ -166,9 +194,9 @@ EOF
             // Push on all tracked branches: feature/aceestver-*, develop, main
             when {
                 anyOf {
-                    branch 'main'
-                    branch 'develop'
-                    branch pattern: 'feature/aceestver-*', comparator: 'GLOB'
+                    expression { params.BUILD_BRANCH == 'main' }
+                    expression { params.BUILD_BRANCH == 'develop' }
+                    expression { params.BUILD_BRANCH.startsWith('feature/aceestver-') }
                 }
             }
             steps {
@@ -187,7 +215,7 @@ EOF
                         echo "Pushed: ${DOCKERHUB_REPO}:${VERSIONED_TAG}"
 
                         # On main: also push :latest
-                        if [ "${BRANCH_NAME}" = "main" ]; then
+                        if [ "${BUILD_BRANCH}" = "main" ]; then
                             docker tag ${DOCKER_IMAGE}:${VERSIONED_TAG} ${DOCKERHUB_REPO}:latest
                             docker push ${DOCKERHUB_REPO}:latest
                             echo "Pushed: ${DOCKERHUB_REPO}:latest"
@@ -200,9 +228,9 @@ EOF
         }
 
         stage('Tag Git Release') {
-            // Only create a git release tag when merging into main
+            // Only create a git release tag when building main
             when {
-                branch 'main'
+                expression { params.BUILD_BRANCH == 'main' }
             }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'github-credentials',
@@ -256,13 +284,13 @@ EOF
 
     post {
         success {
-            echo "BUILD SUCCESSFUL: ${APP_NAME} ${VERSIONED_TAG} (build ${BUILD_NUMBER}) [branch: ${BRANCH_NAME}]"
+            echo "BUILD SUCCESSFUL: ${APP_NAME} ${VERSIONED_TAG} (build ${BUILD_NUMBER}) [branch: ${BUILD_BRANCH}]"
         }
         failure {
-            echo "BUILD FAILED: ${APP_NAME} on branch ${BRANCH_NAME}. Check stage logs for details."
+            echo "BUILD FAILED: ${APP_NAME} on branch ${BUILD_BRANCH}. Check stage logs for details."
         }
         always {
-            echo "Build #${BUILD_NUMBER} completed for branch ${BRANCH_NAME}"
+            echo "Build #${BUILD_NUMBER} completed for branch ${BUILD_BRANCH}"
         }
     }
 }
