@@ -1,0 +1,267 @@
+# ── Namespace ─────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strategy-blue-green
+  labels:
+    strategy: blue-green
+    app: aceest-fitness-app
+---
+# ── ServiceAccount ────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: strategy-blue-green
+  labels:
+    app: aceest-fitness-app
+---
+# ── ConfigMap ─────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: strategy-blue-green
+  labels:
+    app: aceest-fitness-app
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+---
+# ── BLUE Deployment (ACTIVE — v2.0.1) ─────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app-blue
+  namespace: strategy-blue-green
+  labels:
+    app: aceest-fitness-app
+    slot: blue
+    version: v2.0.1
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    deployment.strategy: "blue-green"
+    deployment.slot: "blue"
+    deployment.description: "ACTIVE slot — currently serving live traffic"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      slot: blue
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: aceest-fitness-app
+        slot: blue
+        version: v2.0.1
+      annotations:
+        deployment.strategy: "blue-green"
+        deployment.slot: "blue"
+    spec:
+      serviceAccountName: aceest-app-sa
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 1000
+      containers:
+      - name: aceest-app
+        image: docker.io/2024tm93553/aceest-fitness-app:v2.0.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 9000
+          protocol: TCP
+    version: v1.1-feature
+        - configMapRef:
+            name: aceest-app-config
+        env:
+        - name: DEPLOYMENT_SLOT
+          value: "blue"
+        - name: APP_VERSION
+          value: "v2.0.1"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        version: v1.1-feature
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        volumeMounts:
+        - name: app-data
+        image: docker.io/2024tm93553/aceest-fitness-app:v1.1-feature
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: app-data
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+---
+# ── GREEN Deployment (STANDBY — v2.0.0) ───────────────────────
+apiVersion: apps/v1
+        - name: APP_VERSION
+          value: "v1.1-feature"
+  name: aceest-app-green
+  namespace: strategy-blue-green
+  labels:
+    app: aceest-fitness-app
+    slot: green
+    version: v2.0.0
+  annotations:
+    deployment.strategy: "blue-green"
+    deployment.slot: "green"
+    deployment.description: "STANDBY slot — previous stable version, instant rollback target"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      slot: green
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: aceest-fitness-app
+        slot: green
+        version: v2.0.0
+      annotations:
+        deployment.strategy: "blue-green"
+        deployment.slot: "green"
+    spec:
+      serviceAccountName: aceest-app-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: aceest-app
+        image: docker.io/2024tm93553/aceest-fitness-app:v2.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 9000
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: aceest-app-config
+        env:
+        - name: DEPLOYMENT_SLOT
+          value: "green"
+        - name: APP_VERSION
+          value: "v2.0.0"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        volumeMounts:
+        - name: app-data
+          mountPath: /app/data
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: app-data
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+---
+# ── Service — points to BLUE (active) ─────────────────────────
+# To switch traffic: patch spec.selector.slot to "green" or "blue"
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-blue-green
+  namespace: strategy-blue-green
+  labels:
+    app: aceest-fitness-app
+    strategy: blue-green
+  annotations:
+    service.description: "Active-slot service. Patch selector.slot to switch traffic."
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    slot: blue          # ← change to "green" to switch traffic
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: http
+    nodePort: 30100
+---
+# ── PodDisruptionBudget — Blue ─────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aceest-blue-pdb
+  namespace: strategy-blue-green
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      slot: blue
+---
+# ── PodDisruptionBudget — Green ────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aceest-green-pdb
+  namespace: strategy-blue-green
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      slot: green

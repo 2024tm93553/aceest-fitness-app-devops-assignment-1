@@ -1,0 +1,284 @@
+# ── Namespace ─────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strategy-shadow
+  labels:
+    strategy: shadow
+    app: aceest-fitness-app
+---
+# ── ServiceAccount ────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: strategy-shadow
+  labels:
+    app: aceest-fitness-app
+---
+# ── ConfigMap ─────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+        image: docker.io/2024tm93553/aceest-fitness-app:v2.0.1
+  name: aceest-app-config
+  namespace: strategy-shadow
+  labels:
+    app: aceest-fitness-app
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  APP_VERSION: "2.0.0"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+---
+# ── PRODUCTION Deployment (v2.0.0 — LIVE, user-facing) ────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app-production
+  namespace: strategy-shadow
+  labels:
+    app: aceest-fitness-app
+    role: production
+    version: v2.0.0
+  annotations:
+    deployment.strategy: "shadow"
+    deployment.role: "production"
+    deployment.description: "Live production — users receive responses from this deployment"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      role: production
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: aceest-fitness-app
+        role: production
+        version: v2.0.0
+      annotations:
+        shadow.mode: "false"
+        deployment.role: "production"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: aceest-app
+        image: docker.io/2024tm93553/aceest-fitness-app:v2.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 9000
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: aceest-app-config
+        env:
+        - name: DEPLOYMENT_ROLE
+          value: "production"
+        - name: SHADOW_MODE
+          value: "false"
+        - name: APP_VERSION
+          value: "v2.0.0"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        image: docker.io/2024tm93553/aceest-fitness-app:v1.0-feature
+          failureThreshold: 2
+        volumeMounts:
+        - name: app-data
+          mountPath: /app/data
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: app-data
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+---
+# ── SHADOW Deployment (v2.0.1 — SILENT, NOT user-facing) ──────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app-shadow
+  namespace: strategy-shadow
+  labels:
+    app: aceest-fitness-app
+    role: shadow
+    version: v2.0.1
+  annotations:
+    deployment.strategy: "shadow"
+    deployment.role: "shadow"
+    deployment.description: "Shadow — receives mirrored traffic only. Responses are discarded."
+spec:
+  replicas: 1                   # fewer replicas — shadow doesn't need same capacity
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      role: shadow
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: aceest-fitness-app
+        role: shadow
+        version: v2.0.1
+      annotations:
+        shadow.mode: "true"
+        deployment.role: "shadow"
+        traffic.intent: "mirror-only"
+    spec:
+      serviceAccountName: aceest-app-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: aceest-app
+        image: docker.io/2024tm93553/aceest-fitness-app:v2.0.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 9000
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: aceest-app-config
+        env:
+        - name: DEPLOYMENT_ROLE
+          value: "shadow"
+        - name: SHADOW_MODE
+          value: "true"           # app can check this to skip write mutations
+        - name: APP_VERSION
+          value: "v2.0.1"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 300m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        volumeMounts:
+        - name: app-data
+          mountPath: /app/data
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: app-data
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+---
+# ── Service — PRODUCTION (user-facing, NodePort) ──────────────
+# spec.selector points to production pods.
+# To promote shadow: patch selector.role to "shadow"
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-shadow-production
+  namespace: strategy-shadow
+  labels:
+    app: aceest-fitness-app
+    strategy: shadow
+    role: production
+  annotations:
+    service.description: "User-facing service. Patch selector.role=shadow to promote."
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    role: production             # ← change to "shadow" to promote
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: http
+    nodePort: 30500
+---
+# ── Service — SHADOW (internal only, for manual testing) ──────
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-shadow-mirror
+  namespace: strategy-shadow
+  labels:
+    app: aceest-fitness-app
+    strategy: shadow
+    role: shadow
+  annotations:
+    service.description: "Internal access to shadow pods for manual validation and log inspection"
+spec:
+  type: NodePort                 # NodePort so we can hit it from outside Minikube for testing
+  selector:
+    app: aceest-fitness-app
+    role: shadow
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: http
+    nodePort: 30501
+---
+# ── PodDisruptionBudget — Production ──────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aceest-production-pdb
+  namespace: strategy-shadow
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      role: production

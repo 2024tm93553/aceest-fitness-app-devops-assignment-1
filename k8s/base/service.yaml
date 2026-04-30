@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-app
+  namespace: prod
+  labels:
+    app: aceest-fitness-app
+    version: v2.0.1
+  annotations:
+    description: "ACEest Fitness App Service"
+spec:
+  type: LoadBalancer
+  selector:
+    app: aceest-fitness-app
+    environment: production
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: http
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-app
+  namespace: staging
+  labels:
+    app: aceest-fitness-app
+    version: v2.0.1
+spec:
+  type: ClusterIP
+  selector:
+    app: aceest-fitness-app
+    environment: staging
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-app
+  namespace: dev
+  labels:
+    app: aceest-fitness-app
+    version: v2.0.1
+spec:
+  type: ClusterIP
+  selector:
+    app: aceest-fitness-app
+    environment: development
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: http

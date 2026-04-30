@@ -1,0 +1,183 @@
+# ── Namespace ─────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strategy-rolling
+  labels:
+    strategy: rolling-update
+    app: aceest-fitness-app
+---
+# ── ServiceAccount ────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: strategy-rolling
+  labels:
+    app: aceest-fitness-app
+---
+# ── ConfigMap ─────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: strategy-rolling
+  labels:
+    app: aceest-fitness-app
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+---
+# ── Rolling Update Deployment ─────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app-rolling
+  namespace: strategy-rolling
+  labels:
+    app: aceest-fitness-app
+    strategy: rolling-update
+    version: v2.0.1
+  annotations:
+    deployment.strategy: "rolling-update"
+    deployment.description: "Incremental pod replacement with health checks and automatic rollback on failure"
+    kubernetes.io/change-cause: "Initial deployment v2.0.1"  # shown in rollout history
+spec:
+  replicas: 3
+  # Preserve last 5 revisions for rollback
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      strategy: rolling-update
+  # ── THE CORE: RollingUpdate strategy ──────────────────────
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # allow 1 extra pod during update (33% extra)
+      maxUnavailable: 1  # allow 1 pod to be unavailable at a time
+  template:
+    metadata:
+      labels:
+        app: aceest-fitness-app
+        strategy: rolling-update
+        version: v2.0.1
+      annotations:
+        deployment.strategy: "rolling-update"
+    spec:
+      serviceAccountName: aceest-app-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: aceest-app
+        image: docker.io/2024tm93553/aceest-fitness-app:v2.0.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 9000
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: aceest-app-config
+        env:
+        - name: DEPLOYMENT_STRATEGY
+          value: "rolling-update"
+        - name: APP_VERSION
+          value: "v2.0.1"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        # Startup probe: waits up to 5 min for first success before other probes kick in
+            image: docker.io/2024tm93553/aceest-fitness-app:v2.0.1
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 30
+        # Liveness probe: restarts pod if app hangs
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        # Readiness probe: removes pod from Service endpoints until healthy
+        # This is what prevents bad pods from receiving traffic during rollout
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        # Graceful shutdown: give in-flight requests time to finish
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 10"]
+        volumeMounts:
+        - name: app-data
+          mountPath: /app/data
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: app-data
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 40
+---
+# ── Service ───────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-rolling
+  namespace: strategy-rolling
+  labels:
+    app: aceest-fitness-app
+    strategy: rolling-update
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    strategy: rolling-update
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: http
+    nodePort: 30300
+---
+# ── PodDisruptionBudget ───────────────────────────────────────
+# Ensures at least 2 pods are always available during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aceest-rolling-pdb
+  namespace: strategy-rolling
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      strategy: rolling-update
