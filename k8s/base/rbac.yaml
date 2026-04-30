@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: prod
+  labels:
+    app: aceest-fitness-app
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: staging
+  labels:
+    app: aceest-fitness-app
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: dev
+  labels:
+    app: aceest-fitness-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aceest-app-role
+  namespace: prod
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aceest-app-rolebinding
+  namespace: prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aceest-app-role
+subjects:
+- kind: ServiceAccount
+  name: aceest-app-sa
+  namespace: prod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aceest-app-role
+  namespace: staging
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aceest-app-rolebinding
+  namespace: staging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aceest-app-role
+subjects:
+- kind: ServiceAccount
+  name: aceest-app-sa
+  namespace: staging
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aceest-app-role
+  namespace: dev
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aceest-app-rolebinding
+  namespace: dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aceest-app-role
+subjects:
+- kind: ServiceAccount
+  name: aceest-app-sa
+  namespace: dev

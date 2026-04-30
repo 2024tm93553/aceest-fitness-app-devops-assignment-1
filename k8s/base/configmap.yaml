@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: prod
+  labels:
+    app: aceest-fitness-app
+    version: v2.0.1
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+  MAX_CONTENT_LENGTH: "16777216"  # 16MB
+  JSON_SORT_KEYS: "false"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: staging
+  labels:
+    app: aceest-fitness-app
+    version: v2.0.1
+data:
+  FLASK_ENV: "staging"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "DEBUG"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "staging"
+  FLASK_DEBUG: "true"
+  MAX_CONTENT_LENGTH: "16777216"
+  JSON_SORT_KEYS: "false"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: dev
+  labels:
+    app: aceest-fitness-app
+    version: v2.0.1
+data:
+  FLASK_ENV: "development"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "DEBUG"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "development"
+  FLASK_DEBUG: "true"
+  MAX_CONTENT_LENGTH: "16777216"
+  JSON_SORT_KEYS: "false"

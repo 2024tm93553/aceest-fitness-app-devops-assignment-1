@@ -1,0 +1,250 @@
+# ── Namespace ─────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strategy-canary
+  labels:
+    strategy: canary
+    app: aceest-fitness-app
+---
+# ── ServiceAccount ────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: strategy-canary
+  labels:
+    app: aceest-fitness-app
+---
+# ── ConfigMap ─────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: strategy-canary
+  labels:
+    app: aceest-fitness-app
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+---
+# ── STABLE Deployment (v2.0.0 — majority traffic) ─────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app-stable
+  namespace: strategy-canary
+  labels:
+    app: aceest-fitness-app
+    release: stable
+    version: v2.0.1
+  annotations:
+    deployment.strategy: "canary"
+    deployment.role: "stable"
+    deployment.description: "Stable version — serves majority of traffic"
+spec:
+  replicas: 3                         # 75% traffic (3 out of 4 total pods)
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      release: stable
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: aceest-fitness-app
+        release: stable
+        version: v2.0.1
+      annotations:
+        canary.stage: "stable"
+    spec:
+      serviceAccountName: aceest-app-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: aceest-app
+        image: docker.io/2024tm93553/aceest-fitness-app:v2.0.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 9000
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: aceest-app-config
+        env:
+        - name: RELEASE_TRACK
+          value: "stable"
+        - name: APP_VERSION
+          value: "v2.0.1"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        volumeMounts:
+        - name: app-data
+          mountPath: /app/data
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: app-data
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+---
+# ── CANARY Deployment (v2.0.1 — small traffic slice) ──────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app-canary
+  namespace: strategy-canary
+  labels:
+    app: aceest-fitness-app
+    release: canary
+    version: v2.0.1
+  annotations:
+    deployment.strategy: "canary"
+    deployment.role: "canary"
+    deployment.description: "Canary version — starts at 25%, scale up to promote"
+spec:
+  replicas: 1                         # 25% traffic (1 out of 4 total pods)
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      release: canary
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: aceest-fitness-app
+        release: canary
+        version: v2.0.1
+      annotations:
+        canary.stage: "canary"
+    spec:
+      serviceAccountName: aceest-app-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: aceest-app
+        image: docker.io/2024tm93553/aceest-fitness-app:v2.0.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 9000
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: aceest-app-config
+        env:
+        - name: RELEASE_TRACK
+          value: "canary"
+        - name: APP_VERSION
+          value: "v2.0.1"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        volumeMounts:
+        - name: app-data
+          mountPath: /app/data
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: app-data
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+---
+# ── Service — selects ALL pods (stable + canary) ──────────────
+# Traffic split is controlled purely by replica count ratio
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-canary
+  namespace: strategy-canary
+  labels:
+    app: aceest-fitness-app
+    strategy: canary
+  annotations:
+    service.description: "Routes to both stable and canary pods. Ratio = replica counts."
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app   # matches BOTH stable and canary pods
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: http
+    nodePort: 30200
+---
+# ── PodDisruptionBudget — Stable ──────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aceest-stable-pdb
+  namespace: strategy-canary
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: aceest-fitness-app
+      release: stable

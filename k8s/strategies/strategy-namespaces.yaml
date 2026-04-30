@@ -1,0 +1,325 @@
+# ------- BLUE-GREEN namespace -------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strategy-blue-green
+  labels:
+    strategy: blue-green
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: strategy-blue-green
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+  MAX_CONTENT_LENGTH: "16777216"
+  JSON_SORT_KEYS: "false"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: strategy-blue-green
+---
+# Active slot service (points to blue initially)
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-blue-green
+  namespace: strategy-blue-green
+  labels:
+    strategy: blue-green
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    slot: blue
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: 9000
+    nodePort: 30100
+
+---
+# ------- CANARY namespace -------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strategy-canary
+  labels:
+    strategy: canary
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: strategy-canary
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+  MAX_CONTENT_LENGTH: "16777216"
+  JSON_SORT_KEYS: "false"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: strategy-canary
+---
+# Stable service (majority traffic)
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-canary-stable
+  namespace: strategy-canary
+  labels:
+    strategy: canary
+    release: stable
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    version: v2.0.0
+    release: stable
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: 9000
+    nodePort: 30200
+---
+# Canary service (5% traffic — new version)
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-canary-new
+  namespace: strategy-canary
+  labels:
+    strategy: canary
+    release: canary
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    version: v2.0.1
+    release: canary
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: 9000
+    nodePort: 30201
+
+---
+# ------- ROLLING UPDATE namespace -------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strategy-rolling
+  labels:
+    strategy: rolling-update
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: strategy-rolling
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+  MAX_CONTENT_LENGTH: "16777216"
+  JSON_SORT_KEYS: "false"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: strategy-rolling
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-rolling
+  namespace: strategy-rolling
+  labels:
+    strategy: rolling-update
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    strategy: rolling-update
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: 9000
+    nodePort: 30300
+
+---
+# ------- A/B TESTING namespace -------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strategy-ab
+  labels:
+    strategy: ab-testing
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: strategy-ab
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+  MAX_CONTENT_LENGTH: "16777216"
+  JSON_SORT_KEYS: "false"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: strategy-ab
+---
+# Version A service
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-ab-version-a
+  namespace: strategy-ab
+  labels:
+    strategy: ab-testing
+    variant: a
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    variant: a
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: 9000
+    nodePort: 30400
+---
+# Version B service
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-ab-version-b
+  namespace: strategy-ab
+  labels:
+    strategy: ab-testing
+    variant: b
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    variant: b
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: 9000
+    nodePort: 30401
+
+---
+# ------- SHADOW namespace -------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strategy-shadow
+  labels:
+    strategy: shadow
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aceest-app-config
+  namespace: strategy-shadow
+data:
+  FLASK_ENV: "production"
+  FLASK_APP: "app.py"
+  PYTHONUNBUFFERED: "1"
+  DATABASE_URL: "/app/aceest_fitness.db"
+  LOG_LEVEL: "INFO"
+  APP_VERSION: "2.0.1"
+  ENVIRONMENT: "production"
+  FLASK_DEBUG: "false"
+  MAX_CONTENT_LENGTH: "16777216"
+  JSON_SORT_KEYS: "false"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aceest-app-sa
+  namespace: strategy-shadow
+---
+# Production service (live traffic)
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-shadow-production
+  namespace: strategy-shadow
+  labels:
+    strategy: shadow
+    role: production
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    role: production
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: 9000
+    nodePort: 30500
+---
+# Shadow service (mirrored traffic — not user-facing)
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-shadow-mirror
+  namespace: strategy-shadow
+  labels:
+    strategy: shadow
+    role: shadow
+spec:
+  type: NodePort
+  selector:
+    app: aceest-fitness-app
+    role: shadow
+  ports:
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: 9000
+    nodePort: 30501
