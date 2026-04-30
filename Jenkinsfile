@@ -144,6 +144,33 @@ EOF
             }
         }
 
+        stage('SonarQube Analysis') {
+            environment {
+                SONARQUBE_SERVER = 'SonarQube' // Jenkins SonarQube server name
+            }
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                        ./venv/bin/pip install sonar-scanner
+                        ./venv/bin/sonar-scanner \
+                          -Dsonar.projectKey=aceest-fitness-app \
+                          -Dsonar.sources=. \
+                          -Dsonar.python.coverage.reportPaths=reports/pytest-results.xml \
+                          -Dsonar.host.url=$SONAR_HOST_URL \
+                          -Dsonar.login=$SONAR_AUTH_TOKEN
+                    '''
+                }
+            }
+        }
+
+        stage('SonarQube Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
         stage('Create Versioned Build Artifact') {
             steps {
                 echo 'Creating versioned source artifact...'
