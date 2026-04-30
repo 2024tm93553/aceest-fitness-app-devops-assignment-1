@@ -1,28 +1,8 @@
 pipeline {
     agent any
 
-    // Single Parameterized Pipeline – pick any branch at build time.
-    // Version is read automatically from the VERSION file in the chosen branch.
-
-    parameters {
-        choice(
-            name: 'BUILD_BRANCH',
-            choices: [
-                'develop',
-                'main',
-                'feature/aceestver-1.0',
-                'feature/aceestver-1.1',
-                'feature/aceestver-1.1.2',
-                'feature/aceestver-2.1.2',
-                'feature/aceestver-2.2.1',
-                'feature/aceestver-2.2.4',
-                'feature/aceestver-3.0.1',
-                'feature/aceestver-3.1.2',
-                'feature/aceestver-3.2.4'
-            ],
-            description: 'Select the branch to build and deploy'
-        )
-    }
+    // No manual IMAGE_VERSION parameter – version is read from the VERSION file in each branch.
+    // Jenkins Multibranch Pipeline auto-discovers all feature/*, develop, and main branches.
 
     triggers {
         pollSCM('H/2 * * * *')
@@ -43,42 +23,36 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo "Checking out branch: ${params.BUILD_BRANCH}"
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "refs/heads/${params.BUILD_BRANCH}"]],
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/2024tm93553/aceest-fitness-app-devops-assignment-1.git',
-                        credentialsId: 'github-credentials'
-                    ]]
-                ])
+                echo 'Pulling latest code from Git...'
+                checkout scm
             }
         }
 
         stage('Read Version') {
             steps {
                 script {
-                    // Read semantic version from the VERSION file in the checked-out branch
+                    // Read semantic version from the VERSION file committed in each branch
                     env.APP_VERSION = readFile('VERSION').trim()
-                    env.BUILD_BRANCH = params.BUILD_BRANCH
 
-                    // Determine Docker tag suffix from the selected branch:
-                    //   main            → v3.2.4          (no suffix, also tags :latest)
-                    //   develop         → v3.2.4-dev
-                    //   feature/*       → v3.2.4-feature
-                    if (params.BUILD_BRANCH == 'main') {
+                    // Docker tag uses the version number only — no branch suffix.
+                    // Every branch produces:  aceest-fitness-app:v{VERSION}
+                    //   main    → v3.2.4  (also tagged :latest)
+                    //   develop → v3.2.4-dev
+                    //   feature → v1.1.2  (clean version tag, no -feature suffix)
+                    if (env.BRANCH_NAME == 'main') {
                         env.DOCKER_SUFFIX = ''
-                    } else if (params.BUILD_BRANCH == 'develop') {
+                    } else if (env.BRANCH_NAME == 'develop') {
                         env.DOCKER_SUFFIX = '-dev'
                     } else {
-                        env.DOCKER_SUFFIX = '-feature'
+                        env.DOCKER_SUFFIX = ''
                     }
 
-                    env.VERSIONED_TAG = "v${env.APP_VERSION}${env.DOCKER_SUFFIX}"
+                    env.VERSIONED_TAG  = "v${env.APP_VERSION}${env.DOCKER_SUFFIX}"
+                    env.DOCKER_TAG     = "${env.APP_NAME}:${env.VERSIONED_TAG}"
 
-                    echo "Branch       : ${params.BUILD_BRANCH}"
+                    echo "Branch       : ${env.BRANCH_NAME}"
                     echo "App version  : ${env.APP_VERSION}"
-                    echo "Versioned tag: ${env.VERSIONED_TAG}"
+                    echo "Docker tag   : ${env.DOCKER_TAG}"
                 }
             }
         }
@@ -90,7 +64,7 @@ pipeline {
                     cat > artifacts/build-info.txt <<EOF
 Build Number: ${BUILD_NUMBER}
 App Version: ${APP_VERSION}
-Versioned Tag: ${VERSIONED_TAG}
+Docker Tag:  ${DOCKER_TAG}
 Git Branch:  ${BRANCH_NAME}
 Git Commit:  ${GIT_COMMIT}
 Build Time:  $(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -115,7 +89,7 @@ EOF
             steps {
                 echo 'Running syntax checks...'
                 sh '''
-                    venv/bin/python -m py_compile app.py
+                    venv/bin/python -m py_compile app.py gui_app.py
                     echo "Syntax check passed"
                 '''
             }
@@ -126,8 +100,7 @@ EOF
                 echo 'Running unit tests with pytest...'
                 sh '''
                     export PYTHONPATH=$PYTHONPATH:.
-                    export MPLBACKEND=Agg
-                    venv/bin/pytest tests/ -v --tb=short --junitxml=reports/pytest-results.xml --cov=app --cov-report=xml
+                    venv/bin/pytest tests/ -v --tb=short --junitxml=reports/pytest-results.xml --cov=. --cov-report=xml
                 '''
             }
             post {
@@ -191,12 +164,12 @@ EOF
         }
 
         stage('Push Docker Image to Docker Hub') {
-            // Push on all tracked branches: feature/aceestver-*, develop, main
+            // Push on all tracked branches: feature/*, develop, main
             when {
                 anyOf {
-                    expression { params.BUILD_BRANCH == 'main' }
-                    expression { params.BUILD_BRANCH == 'develop' }
-                    expression { params.BUILD_BRANCH.startsWith('feature/aceestver-') }
+                    branch 'main'
+                    branch 'develop'
+                    branch pattern: 'feature/aceestver-*', comparator: 'GLOB'
                 }
             }
             steps {
@@ -215,7 +188,7 @@ EOF
                         echo "Pushed: ${DOCKERHUB_REPO}:${VERSIONED_TAG}"
 
                         # On main: also push :latest
-                        if [ "${BUILD_BRANCH}" = "main" ]; then
+                        if [ "${BRANCH_NAME}" = "main" ]; then
                             docker tag ${DOCKER_IMAGE}:${VERSIONED_TAG} ${DOCKERHUB_REPO}:latest
                             docker push ${DOCKERHUB_REPO}:latest
                             echo "Pushed: ${DOCKERHUB_REPO}:latest"
@@ -228,9 +201,9 @@ EOF
         }
 
         stage('Tag Git Release') {
-            // Only create a git release tag when building main
+            // Only tag a git release when merging into main
             when {
-                expression { params.BUILD_BRANCH == 'main' }
+                branch 'main'
             }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'github-credentials',
@@ -246,7 +219,7 @@ EOF
                         if ! git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
                             git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME} – build ${BUILD_NUMBER}"
                             git push https://${GH_USER}:${GH_TOKEN}@$(git remote get-url origin | sed 's|https://||') "${TAG_NAME}"
-                            echo "Tagged and pushed: ${TAG_NAME}"
+                            echo "Tagged: ${TAG_NAME}"
                         else
                             echo "Tag ${TAG_NAME} already exists, skipping."
                         fi
@@ -261,11 +234,10 @@ EOF
                 sh '''
                     echo "Checking required project files..."
 
-                    test -f app.py       && echo "app.py exists"
-                    test -f VERSION      && echo "VERSION file exists: $(cat VERSION)"
-                    test -f requirements.txt && echo "requirements.txt exists"
-                    test -f Dockerfile   && echo "Dockerfile exists"
-                    test -d tests        && echo "tests/ directory exists"
+                    test -f app.py && echo "✅ app.py exists"
+                    test -f requirements.txt && echo "✅ requirements.txt exists"
+                    test -f Dockerfile && echo "✅ Dockerfile exists"
+                    test -d tests && echo "✅ tests directory exists"
 
                     echo "Quality gate passed"
                 '''
@@ -284,13 +256,13 @@ EOF
 
     post {
         success {
-            echo "BUILD SUCCESSFUL: ${APP_NAME} ${VERSIONED_TAG} (build ${BUILD_NUMBER}) [branch: ${BUILD_BRANCH}]"
+            echo "BUILD SUCCESSFUL: ${APP_NAME} ${VERSIONED_TAG} (build ${BUILD_NUMBER}) [branch: ${BRANCH_NAME}]"
         }
         failure {
-            echo "BUILD FAILED: ${APP_NAME} on branch ${BUILD_BRANCH}. Check stage logs for details."
+            echo "BUILD FAILED: ${APP_NAME} ${VERSIONED_TAG} on branch ${BRANCH_NAME}. Check stage logs for details."
         }
         always {
-            echo "Build #${BUILD_NUMBER} completed for branch ${BUILD_BRANCH}"
+            echo "Build #${BUILD_NUMBER} completed for branch ${BRANCH_NAME}"
         }
     }
 }
