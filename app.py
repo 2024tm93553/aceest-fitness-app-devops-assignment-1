@@ -17,6 +17,16 @@ app.secret_key = 'aceest-fitness-secret-key-2024'
 # Database configuration (from Aceestver2.0.1)
 DB_NAME = "aceest_fitness.db"
 
+
+def ensure_column(conn, table_name, column_name, column_def):
+    """Add a missing SQLite column for backward-compatible schema upgrades."""
+    cur = conn.cursor()
+    cur.execute(f"PRAGMA table_info({table_name})")
+    existing_columns = {row[1] for row in cur.fetchall()}
+
+    if column_name not in existing_columns:
+        cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+
 def get_db_connection():
     """Get SQLite database connection"""
     conn = sqlite3.connect(DB_NAME)
@@ -53,6 +63,12 @@ def init_db():
             recorded_at TEXT
         )
     """)
+
+    # Migration for users with older DB files from previous assignment versions.
+    ensure_column(conn, 'clients', 'adherence', 'INTEGER DEFAULT 0')
+    ensure_column(conn, 'clients', 'notes', "TEXT DEFAULT ''")
+    ensure_column(conn, 'clients', 'created_at', 'TEXT')
+    ensure_column(conn, 'progress', 'recorded_at', 'TEXT')
 
     conn.commit()
     conn.close()
