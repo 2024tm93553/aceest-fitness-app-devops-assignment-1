@@ -151,11 +151,10 @@ EOF
             steps {
                 withSonarQubeEnv('SonarQube') {
                     sh '''
-                        ./venv/bin/pip install sonar-scanner
-                        ./venv/bin/sonar-scanner \
+                        sonar-scanner \
                           -Dsonar.projectKey=aceest-fitness-app \
                           -Dsonar.sources=. \
-                          -Dsonar.python.coverage.reportPaths=reports/pytest-results.xml \
+                          -Dsonar.python.coverage.reportPaths=reports/coverage.xml \
                           -Dsonar.host.url=$SONAR_HOST_URL \
                           -Dsonar.login=$SONAR_AUTH_TOKEN
                     '''
