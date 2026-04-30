@@ -1,13 +1,8 @@
 pipeline {
     agent any
 
-    parameters {
-        string(
-            name: 'IMAGE_VERSION',
-            defaultValue: '2.0.1',
-            description: 'Docker image version tag (e.g. 2.0.1). Leave blank to use the build number.'
-        )
-    }
+    // No manual IMAGE_VERSION parameter – version is read from the VERSION file in each branch.
+    // Jenkins Multibranch Pipeline auto-discovers all feature/*, develop, and main branches.
 
     triggers {
         pollSCM('H/2 * * * *')
@@ -20,11 +15,9 @@ pipeline {
     }
 
     environment {
-        APP_NAME    = 'aceest-fitness-app'
-        DOCKER_IMAGE = 'aceest-fitness-app'
+        APP_NAME        = 'aceest-fitness-app'
+        DOCKER_IMAGE    = 'aceest-fitness-app'
         DOCKER_REGISTRY = 'docker.io'
-        APP_VERSION = "${params.IMAGE_VERSION ?: env.BUILD_NUMBER}"
-        DOCKER_TAG  = "${APP_NAME}-v${APP_VERSION}"
     }
 
     stages {
@@ -35,6 +28,33 @@ pipeline {
             }
         }
 
+        stage('Read Version') {
+            steps {
+                script {
+                    // Read semantic version from the VERSION file committed in each branch
+                    env.APP_VERSION = readFile('VERSION').trim()
+
+                    // Determine Docker tag suffix by branch type:
+                    //   main            → v3.2.4          (no suffix, also tags :latest)
+                    //   develop         → v3.2.4-dev
+                    //   feature/aceest* → v3.2.4-feature
+                    if (env.BRANCH_NAME == 'main') {
+                        env.DOCKER_SUFFIX = ''
+                    } else if (env.BRANCH_NAME == 'develop') {
+                        env.DOCKER_SUFFIX = '-dev'
+                    } else {
+                        env.DOCKER_SUFFIX = '-feature'
+                    }
+
+                    env.VERSIONED_TAG = "v${env.APP_VERSION}${env.DOCKER_SUFFIX}"
+
+                    echo "Branch       : ${env.BRANCH_NAME}"
+                    echo "App version  : ${env.APP_VERSION}"
+                    echo "Versioned tag: ${env.VERSIONED_TAG}"
+                }
+            }
+        }
+
         stage('Prepare') {
             steps {
                 sh 'mkdir -p artifacts reports'
@@ -42,9 +62,9 @@ pipeline {
                     cat > artifacts/build-info.txt <<EOF
 Build Number: ${BUILD_NUMBER}
 App Version: ${APP_VERSION}
-Docker Tag:  ${DOCKER_TAG}
+Versioned Tag: ${VERSIONED_TAG}
+Git Branch:  ${BRANCH_NAME}
 Git Commit:  ${GIT_COMMIT}
-Git Branch:  ${GIT_BRANCH}
 Build Time:  $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
                     cat artifacts/build-info.txt
@@ -67,7 +87,7 @@ EOF
             steps {
                 echo 'Running syntax checks...'
                 sh '''
-                    venv/bin/python -m py_compile app.py gui_app.py
+                    venv/bin/python -m py_compile app.py
                     echo "Syntax check passed"
                 '''
             }
@@ -99,9 +119,9 @@ EOF
             steps {
                 echo 'Creating versioned source artifact...'
                 sh '''
-                    ARTIFACT_NAME="${APP_NAME}-v${APP_VERSION}-b${BUILD_NUMBER}.tar.gz"
+                    ARTIFACT_NAME="${APP_NAME}-${VERSIONED_TAG}-b${BUILD_NUMBER}.tar.gz"
                     tar -czf "artifacts/${ARTIFACT_NAME}" \
-                        app.py gui_app.py requirements.txt Dockerfile pytest.ini \
+                        app.py VERSION requirements.txt Dockerfile pytest.ini \
                         templates static tests
                     echo "${ARTIFACT_NAME}" > artifacts/latest-artifact.txt
                 '''
@@ -113,8 +133,8 @@ EOF
             steps {
                 echo 'Building Docker image...'
                 sh '''
-                    docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
-                    echo "Built: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    docker build -t ${DOCKER_IMAGE}:${VERSIONED_TAG} .
+                    echo "Built: ${DOCKER_IMAGE}:${VERSIONED_TAG}"
                 '''
             }
         }
@@ -123,7 +143,7 @@ EOF
             steps {
                 echo 'Running container smoke test...'
                 sh '''
-                    docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} ${DOCKER_IMAGE}:${VERSIONED_TAG}
 
                     sleep 5
 
@@ -142,20 +162,65 @@ EOF
         }
 
         stage('Push Docker Image to Docker Hub') {
+            // Push on all tracked branches: feature/aceestver-*, develop, main
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                    branch pattern: 'feature/aceestver-*', comparator: 'GLOB'
+                }
+            }
             steps {
-                echo 'Publishing versioned Docker image tags to Docker Hub...'
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKERHUB_USERNAME', passwordVariable: 'DOCKERHUB_TOKEN')]) {
+                echo "Publishing Docker image for branch: ${env.BRANCH_NAME}"
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials',
+                                                  usernameVariable: 'DOCKERHUB_USERNAME',
+                                                  passwordVariable: 'DOCKERHUB_TOKEN')]) {
                     sh '''
                         DOCKERHUB_REPO="${DOCKER_REGISTRY}/${DOCKERHUB_USERNAME}/${APP_NAME}"
 
                         echo "${DOCKERHUB_TOKEN}" | docker login ${DOCKER_REGISTRY} -u "${DOCKERHUB_USERNAME}" --password-stdin
 
-                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKERHUB_REPO}:${DOCKER_TAG}
-                        docker push ${DOCKERHUB_REPO}:${DOCKER_TAG}
+                        # Push the versioned tag (e.g. v1.0-feature / v2.2.1-dev / v3.2.4)
+                        docker tag ${DOCKER_IMAGE}:${VERSIONED_TAG} ${DOCKERHUB_REPO}:${VERSIONED_TAG}
+                        docker push ${DOCKERHUB_REPO}:${VERSIONED_TAG}
+                        echo "Pushed: ${DOCKERHUB_REPO}:${VERSIONED_TAG}"
 
-                        echo "Pushed: ${DOCKERHUB_REPO}:${DOCKER_TAG}"
+                        # On main: also push :latest
+                        if [ "${BRANCH_NAME}" = "main" ]; then
+                            docker tag ${DOCKER_IMAGE}:${VERSIONED_TAG} ${DOCKERHUB_REPO}:latest
+                            docker push ${DOCKERHUB_REPO}:latest
+                            echo "Pushed: ${DOCKERHUB_REPO}:latest"
+                        fi
 
                         docker logout ${DOCKER_REGISTRY}
+                    '''
+                }
+            }
+        }
+
+        stage('Tag Git Release') {
+            // Only create a git release tag when merging into main
+            when {
+                branch 'main'
+            }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'github-credentials',
+                                                  usernameVariable: 'GH_USER',
+                                                  passwordVariable: 'GH_TOKEN')]) {
+                    sh '''
+                        git config user.email "jenkins@aceest.ci"
+                        git config user.name "Jenkins CI"
+
+                        TAG_NAME="v${APP_VERSION}"
+
+                        # Only create tag if it does not already exist
+                        if ! git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
+                            git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME} – build ${BUILD_NUMBER}"
+                            git push https://${GH_USER}:${GH_TOKEN}@$(git remote get-url origin | sed 's|https://||') "${TAG_NAME}"
+                            echo "Tagged and pushed: ${TAG_NAME}"
+                        else
+                            echo "Tag ${TAG_NAME} already exists, skipping."
+                        fi
                     '''
                 }
             }
@@ -167,10 +232,11 @@ EOF
                 sh '''
                     echo "Checking required project files..."
 
-                    test -f app.py && echo "✅ app.py exists"
-                    test -f requirements.txt && echo "✅ requirements.txt exists"
-                    test -f Dockerfile && echo "✅ Dockerfile exists"
-                    test -d tests && echo "✅ tests directory exists"
+                    test -f app.py       && echo "app.py exists"
+                    test -f VERSION      && echo "VERSION file exists: $(cat VERSION)"
+                    test -f requirements.txt && echo "requirements.txt exists"
+                    test -f Dockerfile   && echo "Dockerfile exists"
+                    test -d tests        && echo "tests/ directory exists"
 
                     echo "Quality gate passed"
                 '''
@@ -189,13 +255,13 @@ EOF
 
     post {
         success {
-            echo "BUILD SUCCESSFUL: ${APP_NAME} v${APP_VERSION} (build ${BUILD_NUMBER})"
+            echo "BUILD SUCCESSFUL: ${APP_NAME} ${VERSIONED_TAG} (build ${BUILD_NUMBER}) [branch: ${BRANCH_NAME}]"
         }
         failure {
-            echo 'BUILD FAILED. Check stage logs for details.'
+            echo "BUILD FAILED: ${APP_NAME} on branch ${BRANCH_NAME}. Check stage logs for details."
         }
         always {
-            echo "Build #${BUILD_NUMBER} completed"
+            echo "Build #${BUILD_NUMBER} completed for branch ${BRANCH_NAME}"
         }
     }
 }
