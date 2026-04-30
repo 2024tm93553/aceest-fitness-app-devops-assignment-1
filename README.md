@@ -168,42 +168,17 @@ curl http://localhost:9000/api/programs
 ### Option 2: Docker Container
 
 ```bash
-# Build versioned images for Docker Hub
-docker build -t docker.io/<dockerhub-username>/aceest-fitness-app:2.0.1 \
-  -t docker.io/<dockerhub-username>/aceest-fitness-app:latest .
-
-# Push both tags to Docker Hub
-docker login docker.io
-docker push docker.io/<dockerhub-username>/aceest-fitness-app:2.0.1
-docker push docker.io/<dockerhub-username>/aceest-fitness-app:latest
+# Build the image
+docker build -t aceest-fitness:latest .
 
 # Run the container
-docker run -d -p 9000:9000 --name aceest-app \
-  docker.io/<dockerhub-username>/aceest-fitness-app:2.0.1
+docker run -d -p 9000:9000 --name aceest-app aceest-fitness:latest
 
 # Verify it's running
 curl http://localhost:9000/health
 ```
 
-### Option 3: Podman Container
-
-```bash
-# Build the same Dockerfile with Podman
-podman build -f Dockerfile \
-  -t docker.io/<dockerhub-username>/aceest-fitness-app:2.0.1 \
-  -t docker.io/<dockerhub-username>/aceest-fitness-app:latest .
-
-# Push both tags to Docker Hub
-podman login docker.io
-podman push docker.io/<dockerhub-username>/aceest-fitness-app:2.0.1
-podman push docker.io/<dockerhub-username>/aceest-fitness-app:latest
-
-# Run the container
-podman run -d -p 9000:9000 --name aceest-app \
-  docker.io/<dockerhub-username>/aceest-fitness-app:2.0.1
-```
-
-### Option 4: GUI Application
+### Option 3: GUI Application
 
 ```bash
 python gui_app.py
@@ -359,20 +334,11 @@ The Dockerfile is optimized for **size** and **security**:
 ### Docker Commands
 
 ```bash
-# Build image locally
+# Build image
 docker build -t aceest-fitness:latest .
 
 # Run container
 docker run -d -p 9000:9000 --name aceest-app aceest-fitness:latest
-
-# Tag for Docker Hub version control
-docker tag aceest-fitness:latest docker.io/<dockerhub-username>/aceest-fitness-app:v2.0.1
-docker tag aceest-fitness:latest docker.io/<dockerhub-username>/aceest-fitness-app:latest
-
-# Publish to Docker Hub
-docker login docker.io
-docker push docker.io/<dockerhub-username>/aceest-fitness-app:v2.0.1
-docker push docker.io/<dockerhub-username>/aceest-fitness-app:latest
 
 # View logs
 docker logs aceest-app
@@ -383,47 +349,9 @@ docker stop aceest-app
 # Remove container
 docker rm aceest-app
 
-# Run tests against the image using the local test suite
-docker run --rm -v "$PWD/tests:/app/tests:ro" aceest-fitness:latest python -m pytest tests/ -v
+# Run tests in container
+docker run --rm aceest-fitness:latest python -m pytest tests/ -v
 ```
-
-### Podman Commands
-
-```bash
-# Build and tag from the same Dockerfile
-podman build -f Dockerfile -t aceest-fitness:latest .
-podman tag aceest-fitness:latest docker.io/<dockerhub-username>/aceest-fitness-app:v2.0.1
-podman tag aceest-fitness:latest docker.io/<dockerhub-username>/aceest-fitness-app:latest
-
-# Publish to Docker Hub
-podman login docker.io
-podman push docker.io/<dockerhub-username>/aceest-fitness-app:v2.0.1
-podman push docker.io/<dockerhub-username>/aceest-fitness-app:latest
-
-# Run with Podman
-podman run -d -p 9000:9000 --name aceest-app aceest-fitness:latest
-```
-
-### Registry Tagging Strategy
-
-- `build-<jenkins-build-number>` keeps each CI build immutable.
-- `v<application-version>` tracks release-oriented image versions.
-- `latest` always points at the newest published image.
-
-### Jenkins Docker Hub Publishing
-
-The Jenkins pipeline publishes the tested image to Docker Hub using the repository pattern below:
-
-```text
-docker.io/<dockerhub-username>/aceest-fitness-app
-```
-
-Configure this Jenkins credential before running the pipeline:
-
-- Credential ID: `dockerhub-credentials`
-- Type: `Username with password`
-- Username: Docker Hub username
-- Password: Docker Hub access token
 
 ### Image Size Comparison
 
