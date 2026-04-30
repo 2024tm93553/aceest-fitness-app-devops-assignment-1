@@ -98,7 +98,8 @@ EOF
                 echo 'Running unit tests with pytest...'
                 sh '''
                     export PYTHONPATH=$PYTHONPATH:.
-                    venv/bin/pytest tests/ -v --tb=short --junitxml=reports/pytest-results.xml --cov=. --cov-report=xml
+                    export MPLBACKEND=Agg
+                    venv/bin/pytest tests/ -v --tb=short --junitxml=reports/pytest-results.xml --cov=app --cov-report=xml
                 '''
             }
             post {
